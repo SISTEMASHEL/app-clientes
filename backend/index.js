@@ -19,28 +19,24 @@ app.use(bodyParser.json());
 
 
 // ------------------- POSTGRESQL POOL (Render-compatible) -------------------
-const connectionString =
-  process.env.DATABASE_URL ||
-  'postgres://postgres:1234@localhost:5432/app_clientes';
-
 const db = new Pool({
-  connectionString,
+  connectionString: process.env.DATABASE_URL,
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 20000,
-  ssl: process.env.NODE_ENV === 'production'
-    ? { rejectUnauthorized: false }
-    : false,
+  ssl: {
+    rejectUnauthorized: false,
+  }
 });
 
 // Verificar conexión
 (async () => {
   try {
     const client = await db.connect();
-    console.log('Conectado a PostgreSQL ✔');
+    console.log('✔ Conectado a PostgreSQL (Render)');
     client.release();
   } catch (err) {
-    console.error('Error conectando a PostgreSQL:', err);
+    console.error('❌ Error conectando a PostgreSQL:', err);
   }
 })();
 
@@ -445,5 +441,5 @@ app.get('/puestos/:id/cuestionarios', async (req, res) => {
 
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor backend escuchando en el puerto ${PORT}`);
+  console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
 });
