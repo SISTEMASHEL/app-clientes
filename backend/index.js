@@ -21,13 +21,11 @@ app.use(bodyParser.json());
 // ------------------- POSTGRESQL POOL (Render-compatible) -------------------
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 20000,
   ssl: {
-    rejectUnauthorized: false,
+    rejectUnauthorized: false
   }
 });
+
 
 // Verificar conexión
 (async () => {
@@ -62,18 +60,29 @@ const upload = multer({ storage });
 
 // LOGIN
 app.post('/login', async (req, res) => {
-  const { usuario, contraseña } = req.body;
-
   try {
+    const { usuario, password } = req.body;
+
+    console.log("BODY:", req.body);
+
     const result = await db.query(
-      'SELECT * FROM usuarios WHERE usuario = $1 AND contraseña = $2',
-      [usuario, contraseña]
+      "SELECT * FROM usuarios WHERE usuario = $1 AND password = $2",
+      [usuario, password]
     );
-    res.send({ success: result.rows.length > 0 });
-  } catch (err) {
-    res.status(500).send(err);
+
+    if (result.rows.length > 0) {
+      res.json({ success: true });
+    } else {
+      res.json({ success: false });
+    }
+
+  } catch (error) {
+    console.error("❌ Error en /login:", error);
+    res.status(500).json({ error: "Error en el servidor" });
   }
 });
+
+
 
 
 // REGISTRAR CLIENTE
