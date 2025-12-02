@@ -8,6 +8,12 @@ const path = require('path');
 const multer = require('multer');
 
 const app = express();
+
+app.use((req, res, next) => {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  next();
+});
+
 const PORT = process.env.PORT || 3001;
 
 // CORS
