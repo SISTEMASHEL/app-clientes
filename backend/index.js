@@ -2,13 +2,15 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const bodyParser = require('body-parser');
 const { Pool } = require('pg');
 const path = require('path');
 const multer = require('multer');
 
 const app = express();
 
+// Forzar UTF-8 en TODO
+app.use(express.json({ type: "application/json; charset=utf-8" }));
+app.use(express.urlencoded({ extended: true }));
 app.use((req, res, next) => {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   next();
@@ -20,8 +22,6 @@ const PORT = process.env.PORT || 3001;
 app.use(cors({
   origin: '*', // en producción usa el dominio real de tu frontend
 }));
-
-app.use(bodyParser.json());
 
 
 // ------------------- POSTGRESQL POOL (Render-compatible) -------------------
