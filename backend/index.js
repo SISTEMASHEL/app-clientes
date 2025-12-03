@@ -134,19 +134,25 @@ app.get('/clientes/:id/areas', async (req, res) => {
 
 
 // AGREGAR ÁREA CON IMAGEN
+
 app.post('/clientes/:id/areas', upload.single('image'), async (req, res) => {
   const { nombre_area, descripcion } = req.body;
-  const imagePath = req.file ? `/uploads/${req.file.filename}` : null;
 
   try {
-    await db.query(
+    const imagePath = req.file ? `/uploads/${req.file.filename}` : null;
+
+    const result = await db.query(
       `INSERT INTO areas_trabajo (cliente_id, nombre_area, descripcion, image)
-       VALUES ($1, $2, $3, $4)`,
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
       [req.params.id, nombre_area, descripcion, imagePath]
     );
-    res.send({ success: true });
+
+    res.json(result.rows[0]);  // **** envia el registro completo al frontend ****
+
   } catch (err) {
-    res.status(500).send(err);
+    console.error(err);
+    res.status(500).send("Error al registrar el área");
   }
 });
 
