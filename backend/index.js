@@ -306,17 +306,12 @@ app.post('/cuestionario', upload.single('image'), async (req, res) => {
 // PREGUNTAS POR SUBOPCIÓN
 app.get('/preguntas/:subopcion_tipo', async (req, res) => {
   try {
-    const filtro = req.params.subopcion_tipo + '%';
-    const result = await db.query(
-      'SELECT * FROM cuestionario_preguntas WHERE subopcion_tipo ILIKE $1',
-      [filtro]
-    );
+    const result = await db.query('SELECT * FROM cuestionario_preguntas WHERE subopcion_tipo = $1', [req.params.subopcion_tipo]);
     return res.json(result.rows);
   } catch (err) {
     return handleServerError(res, err);
   }
 });
-
 
 // INFO ADICIONAL
 app.get('/cuestionarios-info/:puesto_id/:nom/:subopcion_id', async (req, res) => {
