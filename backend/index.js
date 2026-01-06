@@ -465,145 +465,49 @@ app.get('/puestos/:id/cuestionarios', async (req, res) => {
 // Cliente + Área + Puesto
 // ===============================
 app.get("/reporte-consolidado", async (req, res) => {
-const { puestoId } = req.query;
-
-if (!puestoId) {
-  return res.status(400).json({
-    success: false,
-    message: "Debes enviar puestoId"
-  });
-}
-
-
   try {
-    // -------------------------------
-    // SQL CONSOLIDADO
-    // -------------------------------
-    const sql = `
-      SELECT
-        c.id                     AS cliente_id,
-        c.nombre_empresa         AS cliente_nombre,
+    const puestoId = parseInt(req.query.puestoId, 10);
 
-        a.id                     AS area_id,
-        a.nombre_area            AS area_nombre,
-
-        p.id                     AS puesto_id,
-        p.puesto                 AS puesto_nombre,
-
-        ci.id                    AS info_id,
-        ci.nom                   AS nom,
-        ci.created_at            AS fecha,
-        ns.subopcion             AS subopcion,
-
-        ci.observaciones,
-        ci.recomendaciones,
-        ci.recomendaciones_epp,
-
-        q.pregunta,
-        q.respuesta
-
-      FROM clientes c
-      INNER JOIN areas_trabajo a 
-        ON a.cliente_id = c.id
-
-      INNER JOIN puestos_trabajo p 
-        ON p.area_id = a.id
-
-      INNER JOIN cuestionarios_info ci 
-        ON ci.puesto_id = p.id
-
-      INNER JOIN cuestionarios q 
-        ON q.info_id = ci.id
-
-      LEFT JOIN nom_subopciones ns 
-        ON ns.id = ci.subopcion_id
-
-      WHERE p.id = $1
-
-      ORDER BY ci.created_at ASC, ci.id ASC;
-    `;
-
-    // -------------------------------
-    // EJECUTAR QUERY
-    // -------------------------------
-    const { rows } = await db.query(sql, [
-      clienteId,
-      areaId,
-      puestoId
-    ]);
-
-    // -------------------------------
-    // SIN DATOS
-    // -------------------------------
-    if (rows.length === 0) {
-      return res.json({
-        success: true,
-        cliente: null,
-        area: null,
-        puesto: null,
-        cuestionarios: []
-      });
+    if (!puestoId) {
+      return res.status(400).json({ message: "puestoId requerido" });
     }
 
-    // -------------------------------
-    // ARMAR RESPUESTA
-    // -------------------------------
-    const first = rows[0];
+    const sql = `
+      SELECT
+        c.id AS cliente_id,
+        c.nombre_empresa AS cliente_nombre,
+        a.id AS area_id,
+        a.nombre_area AS area_nombre,
+        p.id AS puesto_id,
+        p.puesto AS puesto_nombre,
+        ci.id AS info_id,
+        ci.nom,
+        ci.created_at,
+        ns.subopcion,
+        q.pregunta,
+        q.respuesta
+      FROM puestos_trabajo p
+      JOIN areas_trabajo a ON a.id = p.area_id
+      JOIN clientes c ON c.id = a.cliente_id
+      JOIN cuestionarios_info ci ON ci.puesto_id = p.id
+      JOIN cuestionarios q ON q.info_id = ci.id
+      LEFT JOIN nom_subopciones ns ON ns.id = ci.subopcion_id
+      WHERE p.id = $1
+      ORDER BY ci.created_at;
+    `;
 
-    const response = {
-      success: true,
-      cliente: {
-        id: first.cliente_id,
-        nombre: first.cliente_nombre
-      },
-      area: {
-        id: first.area_id,
-        nombre: first.area_nombre
-      },
-      puesto: {
-        id: first.puesto_id,
-        nombre: first.puesto_nombre
-      },
-      cuestionarios: []
-    };
+    const { rows } = await db.query(sql, [puestoId]);
 
-    const map = {};
-
-    rows.forEach(row => {
-      if (!map[row.info_id]) {
-        map[row.info_id] = {
-          info_id: row.info_id,
-          nom: row.nom,
-          subopcion: row.subopcion,
-          fecha: row.fecha,
-          observaciones: row.observaciones,
-          recomendaciones: row.recomendaciones,
-          recomendaciones_epp: row.recomendaciones_epp,
-          respuestas: []
-        };
-
-        response.cuestionarios.push(map[row.info_id]);
-      }
-
-      map[row.info_id].respuestas.push({
-        pregunta: row.pregunta,
-        respuesta: row.respuesta
-      });
-    });
-
-    // -------------------------------
-    // RESPUESTA FINAL
-    // -------------------------------
-    res.json(response);
-
+    res.json(rows);
   } catch (error) {
-    console.error("❌ Error reporte consolidado:", error);
+    console.error("❌ Error reporte consolidado:", error.message);
     res.status(500).json({
-      success: false,
-      message: "Error al generar el reporte consolidado"
+      message: "Error interno en reporte consolidado",
+      error: error.message
     });
   }
 });
+
 
 
 // ------------------- INICIAR SERVIDOR -------------------
