@@ -463,16 +463,27 @@ app.get('/puestos/:id/cuestionarios', async (req, res) => {
 // REPORTE CONSOLIDADO NOM
 // Cliente + Área + Puesto
 // ===============================
+// ===============================
+// REPORTE CONSOLIDADO NOM
+// Cliente + Área + Puesto
+// ===============================
 app.get("/reporte-consolidado", async (req, res) => {
   const { clienteId, areaId, puestoId } = req.query;
 
+  // -------------------------------
+  // VALIDACIÓN DE PARÁMETROS
+  // -------------------------------
   if (!clienteId || !areaId || !puestoId) {
     return res.status(400).json({
+      success: false,
       message: "Debes enviar clienteId, areaId y puestoId"
     });
   }
 
   try {
+    // -------------------------------
+    // SQL CONSOLIDADO
+    // -------------------------------
     const sql = `
       SELECT
         c.id                     AS cliente_id,
@@ -519,14 +530,21 @@ app.get("/reporte-consolidado", async (req, res) => {
       ORDER BY ci.created_at ASC, ci.id ASC;
     `;
 
+    // -------------------------------
+    // EJECUTAR QUERY
+    // -------------------------------
     const { rows } = await db.query(sql, [
       clienteId,
       areaId,
       puestoId
     ]);
 
+    // -------------------------------
+    // SIN DATOS
+    // -------------------------------
     if (rows.length === 0) {
       return res.json({
+        success: true,
         cliente: null,
         area: null,
         puesto: null,
@@ -534,9 +552,13 @@ app.get("/reporte-consolidado", async (req, res) => {
       });
     }
 
+    // -------------------------------
+    // ARMAR RESPUESTA
+    // -------------------------------
     const first = rows[0];
 
     const response = {
+      success: true,
       cliente: {
         id: first.cliente_id,
         nombre: first.cliente_nombre
@@ -566,6 +588,7 @@ app.get("/reporte-consolidado", async (req, res) => {
           recomendaciones_epp: row.recomendaciones_epp,
           respuestas: []
         };
+
         response.cuestionarios.push(map[row.info_id]);
       }
 
@@ -575,15 +598,20 @@ app.get("/reporte-consolidado", async (req, res) => {
       });
     });
 
+    // -------------------------------
+    // RESPUESTA FINAL
+    // -------------------------------
     res.json(response);
 
   } catch (error) {
     console.error("❌ Error reporte consolidado:", error);
     res.status(500).json({
+      success: false,
       message: "Error al generar el reporte consolidado"
     });
   }
 });
+
 
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, '0.0.0.0', () => {
