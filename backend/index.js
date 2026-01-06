@@ -460,25 +460,20 @@ app.get('/puestos/:id/cuestionarios', async (req, res) => {
 });
 
 // ===============================
-// REPORTE CONSOLIDADO NOM
-// Cliente + Área + Puesto
-// ===============================
 // ===============================
 // REPORTE CONSOLIDADO NOM
 // Cliente + Área + Puesto
 // ===============================
 app.get("/reporte-consolidado", async (req, res) => {
-  const { clienteId, areaId, puestoId } = req.query;
+const { puestoId } = req.query;
 
-  // -------------------------------
-  // VALIDACIÓN DE PARÁMETROS
-  // -------------------------------
-  if (!clienteId || !areaId || !puestoId) {
-    return res.status(400).json({
-      success: false,
-      message: "Debes enviar clienteId, areaId y puestoId"
-    });
-  }
+if (!puestoId) {
+  return res.status(400).json({
+    success: false,
+    message: "Debes enviar puestoId"
+  });
+}
+
 
   try {
     // -------------------------------
@@ -523,9 +518,7 @@ app.get("/reporte-consolidado", async (req, res) => {
       LEFT JOIN nom_subopciones ns 
         ON ns.id = ci.subopcion_id
 
-      WHERE c.id = $1
-        AND a.id = $2
-        AND p.id = $3
+      WHERE p.id = $1
 
       ORDER BY ci.created_at ASC, ci.id ASC;
     `;
