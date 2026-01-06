@@ -459,6 +459,131 @@ app.get('/puestos/:id/cuestionarios', async (req, res) => {
   }
 });
 
+// ===============================
+// REPORTE CONSOLIDADO NOM
+// Cliente + Área + Puesto
+// ===============================
+app.get("/reporte-consolidado", async (req, res) => {
+  const { clienteId, areaId, puestoId } = req.query;
+
+  if (!clienteId || !areaId || !puestoId) {
+    return res.status(400).json({
+      message: "Debes enviar clienteId, areaId y puestoId"
+    });
+  }
+
+  try {
+    const sql = `
+      SELECT
+        c.id                     AS cliente_id,
+        c.nombre_empresa         AS cliente_nombre,
+
+        a.id                     AS area_id,
+        a.nombre_area            AS area_nombre,
+
+        p.id                     AS puesto_id,
+        p.puesto                 AS puesto_nombre,
+
+        ci.id                    AS info_id,
+        ci.nom                   AS nom,
+        ci.created_at            AS fecha,
+        ns.subopcion             AS subopcion,
+
+        ci.observaciones,
+        ci.recomendaciones,
+        ci.recomendaciones_epp,
+
+        q.pregunta,
+        q.respuesta
+
+      FROM clientes c
+      INNER JOIN areas_trabajo a 
+        ON a.cliente_id = c.id
+
+      INNER JOIN puestos_trabajo p 
+        ON p.area_id = a.id
+
+      INNER JOIN cuestionarios_info ci 
+        ON ci.puesto_id = p.id
+
+      INNER JOIN cuestionarios q 
+        ON q.info_id = ci.id
+
+      LEFT JOIN nom_subopciones ns 
+        ON ns.id = ci.subopcion_id
+
+      WHERE c.id = $1
+        AND a.id = $2
+        AND p.id = $3
+
+      ORDER BY ci.created_at ASC, ci.id ASC;
+    `;
+
+    const { rows } = await db.query(sql, [
+      clienteId,
+      areaId,
+      puestoId
+    ]);
+
+    if (rows.length === 0) {
+      return res.json({
+        cliente: null,
+        area: null,
+        puesto: null,
+        cuestionarios: []
+      });
+    }
+
+    const first = rows[0];
+
+    const response = {
+      cliente: {
+        id: first.cliente_id,
+        nombre: first.cliente_nombre
+      },
+      area: {
+        id: first.area_id,
+        nombre: first.area_nombre
+      },
+      puesto: {
+        id: first.puesto_id,
+        nombre: first.puesto_nombre
+      },
+      cuestionarios: []
+    };
+
+    const map = {};
+
+    rows.forEach(row => {
+      if (!map[row.info_id]) {
+        map[row.info_id] = {
+          info_id: row.info_id,
+          nom: row.nom,
+          subopcion: row.subopcion,
+          fecha: row.fecha,
+          observaciones: row.observaciones,
+          recomendaciones: row.recomendaciones,
+          recomendaciones_epp: row.recomendaciones_epp,
+          respuestas: []
+        };
+        response.cuestionarios.push(map[row.info_id]);
+      }
+
+      map[row.info_id].respuestas.push({
+        pregunta: row.pregunta,
+        respuesta: row.respuesta
+      });
+    });
+
+    res.json(response);
+
+  } catch (error) {
+    console.error("❌ Error reporte consolidado:", error);
+    res.status(500).json({
+      message: "Error al generar el reporte consolidado"
+    });
+  }
+});
 
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, '0.0.0.0', () => {
