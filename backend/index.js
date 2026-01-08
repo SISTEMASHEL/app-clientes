@@ -483,6 +483,9 @@ app.get("/reporte-consolidado", async (req, res) => {
         ci.id AS info_id,
         ci.nom,
         ci.created_at,
+          ci.observaciones AS naturaleza_emision,
+  ci.recomendaciones AS descripcion_operacion,
+  ci.recomendaciones_epp AS epp_recomendado,
         ns.subopcion,
         q.pregunta,
         q.respuesta
