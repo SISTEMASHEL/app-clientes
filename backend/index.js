@@ -511,6 +511,74 @@ app.get("/reporte-consolidado", async (req, res) => {
   }
 });
 
+// ------------------- ELIMINAR CLIENTE COMPLETO -------------------
+app.delete('/clientes/:id', async (req, res) => {
+  const clienteId = req.params.id;
+  const client = await db.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // 1️⃣ Obtener áreas del cliente
+    const areas = await client.query(
+      'SELECT id FROM areas_trabajo WHERE cliente_id = $1',
+      [clienteId]
+    );
+
+    for (const area of areas.rows) {
+      // 2️⃣ Obtener puestos del área
+      const puestos = await client.query(
+        'SELECT id FROM puestos_trabajo WHERE area_id = $1',
+        [area.id]
+      );
+
+      for (const puesto of puestos.rows) {
+        // 3️⃣ Eliminar relaciones del puesto
+        await client.query('DELETE FROM puestos_riesgos WHERE puesto_id = $1', [puesto.id]);
+        await client.query('DELETE FROM puestos_epp WHERE puesto_id = $1', [puesto.id]);
+        await client.query('DELETE FROM puestos_normas WHERE puesto_id = $1', [puesto.id]);
+
+        // 4️⃣ Obtener cuestionarios_info
+        const infos = await client.query(
+          'SELECT id FROM cuestionarios_info WHERE puesto_id = $1',
+          [puesto.id]
+        );
+
+        for (const info of infos.rows) {
+          // 5️⃣ Eliminar respuestas
+          await client.query('DELETE FROM cuestionarios WHERE info_id = $1', [info.id]);
+        }
+
+        // 6️⃣ Eliminar info cuestionarios
+        await client.query('DELETE FROM cuestionarios_info WHERE puesto_id = $1', [puesto.id]);
+
+        // 7️⃣ Eliminar puesto
+        await client.query('DELETE FROM puestos_trabajo WHERE id = $1', [puesto.id]);
+      }
+
+      // 8️⃣ Eliminar área
+      await client.query('DELETE FROM areas_trabajo WHERE id = $1', [area.id]);
+    }
+
+    // 9️⃣ Eliminar cliente
+    await client.query('DELETE FROM clientes WHERE id = $1', [clienteId]);
+
+    await client.query('COMMIT');
+
+    res.json({ success: true, message: 'Cliente eliminado correctamente' });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('❌ Error eliminando cliente:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error eliminando cliente'
+    });
+  } finally {
+    client.release();
+  }
+});
+
 
 
 // ------------------- INICIAR SERVIDOR -------------------
