@@ -89,6 +89,8 @@ app.post('/login', async (req, res) => {
 });
 
 
+
+
 // REGISTRAR CLIENTE
 app.post('/cliente', async (req, res) => {
   const { nombre_empresa, nombre, telefono, direccion, puesto } = req.body;
