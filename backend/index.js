@@ -66,36 +66,28 @@ const upload = multer({ storage });
 
 // LOGIN
 app.post('/login', async (req, res) => {
-
-  const { usuario, password } = req.body;
-
   try {
+    const { usuario, password } = req.body;
+
+    console.log("BODY:", req.body);
 
     const result = await db.query(
-
-      `SELECT * FROM usuarios
-       WHERE usuario = $1
-       AND password = $2`,
-
+      "SELECT * FROM usuarios WHERE usuario = $1 AND password = $2",
       [usuario, password]
     );
 
     if (result.rows.length > 0) {
-
-      res.send(result.rows[0]);
-
+      res.json({ success: true });
     } else {
-
-      res.status(401).send({
-        error: "Credenciales incorrectas"
-      });
+      res.json({ success: false });
     }
 
-  } catch (err) {
-
-    res.status(500).send(err);
+  } catch (error) {
+    console.error("❌ Error en /login:", error);
+    res.status(500).json({ error: "Error en el servidor" });
   }
 });
+
 
 
 // REGISTRAR CLIENTE
