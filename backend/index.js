@@ -90,30 +90,76 @@ app.post('/login', async (req, res) => {
 
 
 
-
 // REGISTRAR CLIENTE
+
 app.post('/cliente', async (req, res) => {
-  const { nombre_empresa, nombre, telefono, direccion, puesto } = req.body;
+
+  const {
+    nombre_empresa,
+    nombre,
+    telefono,
+    direccion,
+    puesto,
+    usuario_id
+  } = req.body;
 
   try {
+
     await db.query(
-      `INSERT INTO clientes (nombre_empresa, nombre, telefono, direccion, puesto)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [nombre_empresa, nombre, telefono, direccion, puesto]
+
+      `INSERT INTO clientes
+      (
+        nombre_empresa,
+        nombre,
+        telefono,
+        direccion,
+        puesto,
+        usuario_id
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)`,
+
+      [
+        nombre_empresa,
+        nombre,
+        telefono,
+        direccion,
+        puesto,
+        usuario_id
+      ]
     );
+
     res.send({ success: true });
+
   } catch (err) {
+
+    console.log(err);
+
     res.status(500).send(err);
   }
 });
 
+// OBTENER CLIENTES POR USUARIO
 
-// OBTENER CLIENTES
-app.get('/clientes', async (req, res) => {
+app.get('/clientes/:usuarioId', async (req, res) => {
+
   try {
-    const result = await db.query('SELECT * FROM clientes ORDER BY id DESC');
+
+    const result = await db.query(
+
+      `SELECT *
+       FROM clientes
+       WHERE usuario_id = $1
+       ORDER BY id DESC`,
+
+      [req.params.usuarioId]
+    );
+
     res.send(result.rows);
+
   } catch (err) {
+
+    console.log(err);
+
     res.status(500).send(err);
   }
 });
