@@ -66,56 +66,113 @@ const upload = multer({ storage });
 
 // LOGIN
 app.post('/login', async (req, res) => {
+
   try {
+
     const { usuario, password } = req.body;
 
-    console.log("BODY:", req.body);
-
     const result = await db.query(
-      "SELECT * FROM usuarios WHERE usuario = $1 AND password = $2",
+      'SELECT * FROM usuarios WHERE usuario = $1 AND password = $2',
       [usuario, password]
     );
 
     if (result.rows.length > 0) {
-      res.json({ success: true });
+
+      res.json({
+        success: true,
+        usuario: result.rows[0]
+      });
+
     } else {
-      res.json({ success: false });
+
+      res.json({
+        success: false
+      });
+
     }
 
   } catch (error) {
-    console.error("❌ Error en /login:", error);
-    res.status(500).json({ error: "Error en el servidor" });
+
+    console.log(error);
+
+    res.status(500).json({
+      success: false
+    });
+
   }
+
 });
-
-
 
 
 // REGISTRAR CLIENTE
 app.post('/cliente', async (req, res) => {
-  const { nombre_empresa, nombre, telefono, direccion, puesto } = req.body;
 
   try {
+
+    const {
+      nombre_empresa,
+      nombre,
+      telefono,
+      direccion,
+      puesto,
+      usuario_id
+    } = req.body;
+
     await db.query(
-      `INSERT INTO clientes (nombre_empresa, nombre, telefono, direccion, puesto)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [nombre_empresa, nombre, telefono, direccion, puesto]
+      `INSERT INTO clientes
+      (nombre_empresa, nombre, telefono, direccion, puesto, usuario_id)
+      VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        nombre_empresa,
+        nombre,
+        telefono,
+        direccion,
+        puesto,
+        usuario_id
+      ]
     );
-    res.send({ success: true });
-  } catch (err) {
-    res.status(500).send(err);
+
+    res.json({
+      success: true
+    });
+
+  } catch (error) {
+
+    console.log(error);
+
+    res.status(500).json({
+      success: false
+    });
+
   }
+
 });
 
 
 // OBTENER CLIENTES
-app.get('/clientes', async (req, res) => {
+app.get('/clientes/:usuarioId', async (req, res) => {
+
   try {
-    const result = await db.query('SELECT * FROM clientes ORDER BY id DESC');
-    res.send(result.rows);
-  } catch (err) {
-    res.status(500).send(err);
+
+    const { usuarioId } = req.params;
+
+    const result = await db.query(
+      'SELECT * FROM clientes WHERE usuario_id = $1 ORDER BY id DESC',
+      [usuarioId]
+    );
+
+    res.json(result.rows);
+
+  } catch (error) {
+
+    console.log(error);
+
+    res.status(500).json({
+      error: 'Error al obtener clientes'
+    });
+
   }
+
 });
 
 
