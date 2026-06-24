@@ -726,40 +726,36 @@ app.post('/inventario', async (req, res) => {
 });
 
 //Listar Inventario
-app.get('/inventario/:usuarioId', async (req, res) => {
+app.get('/inventario/cliente/:clienteId', async (req, res) => {
 
   try {
 
     const result = await db.query(
-
-      `SELECT
+      `
+      SELECT
         i.*,
         c.nombre_empresa,
         a.nombre_area,
         p.puesto
-
       FROM inventario i
-
-      JOIN clientes c
-      ON c.id = i.cliente_id
-
-      JOIN areas_trabajo a
-      ON a.id = i.area_id
-
-      JOIN puestos_trabajo p
-      ON p.id = i.puesto_id
-
-      WHERE i.usuario_id = $1
-
-      ORDER BY i.id DESC`,
-      [req.params.usuarioId]
+      JOIN clientes c ON c.id = i.cliente_id
+      JOIN areas_trabajo a ON a.id = i.area_id
+      JOIN puestos_trabajo p ON p.id = i.puesto_id
+      WHERE i.cliente_id = $1
+      ORDER BY i.id DESC
+      `,
+      [req.params.clienteId]
     );
 
     res.json(result.rows);
 
   } catch (error) {
 
-    res.status(500).json(error);
+    console.log(error);
+
+    res.status(500).json({
+      error: error.message
+    });
 
   }
 
