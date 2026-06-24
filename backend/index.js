@@ -664,7 +664,106 @@ app.delete('/clientes/:id', async (req, res) => {
   }
 });
 
+//Crear inventario
 
+app.post('/inventario', async (req, res) => {
+
+  try {
+
+    const {
+      clave_producto,
+      nombre_producto,
+      cantidad_min,
+      cantidad_max,
+      cantidad_total,
+      usuario_id,
+      cliente_id,
+      area_id,
+      puesto_id
+    } = req.body;
+
+    const result = await db.query(
+      `INSERT INTO inventario
+      (
+        clave_producto,
+        nombre_producto,
+        cantidad_min,
+        cantidad_max,
+        cantidad_total,
+        usuario_id,
+        cliente_id,
+        area_id,
+        puesto_id
+      )
+      VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING *`,
+      [
+        clave_producto,
+        nombre_producto,
+        cantidad_min,
+        cantidad_max,
+        cantidad_total,
+        usuario_id,
+        cliente_id,
+        area_id,
+        puesto_id
+      ]
+    );
+
+    res.json(result.rows[0]);
+
+  } catch (error) {
+
+    console.log(error);
+
+    res.status(500).json({
+      error: error.message
+    });
+
+  }
+
+});
+
+//Listar Inventario
+app.get('/inventario/:usuarioId', async (req, res) => {
+
+  try {
+
+    const result = await db.query(
+
+      `SELECT
+        i.*,
+        c.nombre_empresa,
+        a.nombre_area,
+        p.puesto
+
+      FROM inventario i
+
+      JOIN clientes c
+      ON c.id = i.cliente_id
+
+      JOIN areas_trabajo a
+      ON a.id = i.area_id
+
+      JOIN puestos_trabajo p
+      ON p.id = i.puesto_id
+
+      WHERE i.usuario_id = $1
+
+      ORDER BY i.id DESC`,
+      [req.params.usuarioId]
+    );
+
+    res.json(result.rows);
+
+  } catch (error) {
+
+    res.status(500).json(error);
+
+  }
+
+});
 
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, '0.0.0.0', () => {
