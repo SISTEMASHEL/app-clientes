@@ -726,7 +726,7 @@ app.post('/inventario', async (req, res) => {
 });
 
 //Listar Inventario
-app.get('/inventario/cliente/:clienteId', async (req, res) => {
+app.get('/inventario/:clienteId', async (req, res) => {
 
   try {
 
