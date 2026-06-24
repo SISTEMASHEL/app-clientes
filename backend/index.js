@@ -761,7 +761,7 @@ app.get('/inventario/:clienteId', async (req, res) => {
 
 });
 
-app.put('/inventario/:id', async (req, res) => {
+app.put('/inventario/:clienteId', async (req, res) => {
 
   try {
 
