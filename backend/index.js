@@ -59,7 +59,33 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + ext);
   }
 });
-const upload = multer({ storage });
+
+
+const fileFilter = (req, file, cb) => {
+
+  const permitidos = [
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "application/pdf"
+  ];
+
+  if (permitidos.includes(file.mimetype)) {
+
+    cb(null, true);
+
+  } else {
+
+    cb(new Error("Tipo de archivo no permitido"), false);
+
+  }
+
+};
+
+const upload = multer({
+  storage,
+  fileFilter
+});
 
 
 // ------------------- RUTAS ------------------- //
@@ -439,6 +465,64 @@ app.post('/cuestionario', upload.single('image'), async (req, res) => {
     client.release();
   }
 });
+
+// SUBIR DOCUMENTOS (ARP / FICHA)
+
+app.post(
+  "/documentos",
+  upload.single("archivo"),
+  async (req, res) => {
+
+    try {
+
+      const {
+        cuestionario_info_id,
+        tipo
+      } = req.body;
+
+      if (!req.file) {
+
+        return res.status(400).json({
+          error: "No se recibió archivo"
+        });
+
+      }
+
+      const ruta = `/uploads/${req.file.filename}`;
+
+      const result = await db.query(
+
+        `INSERT INTO documentos_cuestionario
+        (
+          cuestionario_info_id,
+          tipo,
+          archivo
+        )
+        VALUES ($1,$2,$3)
+        RETURNING *`,
+
+        [
+          cuestionario_info_id,
+          tipo,
+          ruta
+        ]
+
+      );
+
+      res.json(result.rows[0]);
+
+    } catch (error) {
+
+      console.log(error);
+
+      res.status(500).json({
+        error: error.message
+      });
+
+    }
+
+  }
+);
 
 
 // PREGUNTAS POR SUBOPCIÓN
