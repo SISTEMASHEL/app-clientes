@@ -1,11 +1,11 @@
 // ------------------- CONFIGURACIONES GENERALES -------------------
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const { Pool } = require('pg');
-const path = require('path');
-const multer = require('multer');
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const bodyParser = require("body-parser");
+const { Pool } = require("pg");
+const path = require("path");
+const multer = require("multer");
 
 const app = express();
 
@@ -17,197 +17,149 @@ app.use((req, res, next) => {
 const PORT = process.env.PORT || 3001;
 
 // CORS
-app.use(cors({
-  origin: '*', // en producción usa el dominio real de tu frontend
-}));
+app.use(
+  cors({
+    origin: "*", // en producción usa el dominio real de tu frontend
+  }),
+);
 
 app.use(bodyParser.json());
-
 
 // ------------------- POSTGRESQL POOL (Render-compatible) -------------------
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false
-  }
+    rejectUnauthorized: false,
+  },
 });
-
 
 // Verificar conexión
 (async () => {
   try {
     const client = await db.connect();
-    console.log('✔ Conectado a PostgreSQL (Render)');
+    console.log("✔ Conectado a PostgreSQL (Render)");
     client.release();
   } catch (err) {
-    console.error('❌ Error conectando a PostgreSQL:', err);
+    console.error("❌ Error conectando a PostgreSQL:", err);
   }
 })();
 
-
 // ------------------- CARPETA PÚBLICA PARA IMÁGENES -------------------
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // ------------------- MULTER PARA SUBIR IMÁGENES -------------------
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, path.join(__dirname, 'uploads/'));
+    cb(null, path.join(__dirname, "uploads/"));
   },
   filename: function (req, file, cb) {
     const ext = path.extname(file.originalname);
     cb(null, Date.now() + ext);
-  }
+  },
 });
 
-
 const fileFilter = (req, file, cb) => {
-
   const permitidos = [
     "image/jpeg",
     "image/jpg",
     "image/png",
-    "application/pdf"
+    "application/pdf",
   ];
 
   if (permitidos.includes(file.mimetype)) {
-
     cb(null, true);
-
   } else {
-
     cb(new Error("Tipo de archivo no permitido"), false);
-
   }
-
 };
 
 const upload = multer({
   storage,
-  fileFilter
+  fileFilter,
 });
-
 
 // ------------------- RUTAS ------------------- //
 
 // LOGIN
-app.post('/login', async (req, res) => {
-
+app.post("/login", async (req, res) => {
   try {
-
     const { usuario, password } = req.body;
 
     const result = await db.query(
-      'SELECT * FROM usuarios WHERE usuario = $1 AND password = $2',
-      [usuario, password]
+      "SELECT * FROM usuarios WHERE usuario = $1 AND password = $2",
+      [usuario, password],
     );
 
     if (result.rows.length > 0) {
-
       res.json({
         success: true,
-        usuario: result.rows[0]
+        usuario: result.rows[0],
       });
-
     } else {
-
       res.json({
-        success: false
+        success: false,
       });
-
     }
-
   } catch (error) {
-
     console.log(error);
 
     res.status(500).json({
-      success: false
+      success: false,
     });
-
   }
-
 });
 
-
 // REGISTRAR CLIENTE
-app.post('/cliente', async (req, res) => {
-
+app.post("/cliente", async (req, res) => {
   try {
-
-    const {
-      nombre_empresa,
-      nombre,
-      telefono,
-      direccion,
-      puesto,
-      usuario_id
-    } = req.body;
+    const { nombre_empresa, nombre, telefono, direccion, puesto, usuario_id } =
+      req.body;
 
     await db.query(
       `INSERT INTO clientes
       (nombre_empresa, nombre, telefono, direccion, puesto, usuario_id)
       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
-        nombre_empresa,
-        nombre,
-        telefono,
-        direccion,
-        puesto,
-        usuario_id
-      ]
+      [nombre_empresa, nombre, telefono, direccion, puesto, usuario_id],
     );
 
     res.json({
-      success: true
+      success: true,
     });
-
   } catch (error) {
-
     console.log(error);
 
     res.status(500).json({
-      success: false
+      success: false,
     });
-
   }
-
 });
 
-
 // OBTENER CLIENTES
-app.get('/clientes/:usuarioId', async (req, res) => {
-
+app.get("/clientes/:usuarioId", async (req, res) => {
   try {
-
     const { usuarioId } = req.params;
 
     const result = await db.query(
-      'SELECT * FROM clientes WHERE usuario_id = $1 ORDER BY id DESC',
-      [usuarioId]
+      "SELECT * FROM clientes WHERE usuario_id = $1 ORDER BY id DESC",
+      [usuarioId],
     );
 
     res.json(result.rows);
-
   } catch (error) {
-
     console.log(error);
 
     res.status(500).json({
-      error: 'Error al obtener clientes'
+      error: "Error al obtener clientes",
     });
-
   }
-
 });
 
-
 // AREAS POR CLIENTE
-app.get('/clientes/:id/areas', async (req, res) => {
+app.get("/clientes/:id/areas", async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT * FROM areas_trabajo WHERE cliente_id = $1',
-      [req.params.id]
+      "SELECT * FROM areas_trabajo WHERE cliente_id = $1",
+      [req.params.id],
     );
     res.send(result.rows);
   } catch (err) {
@@ -215,26 +167,15 @@ app.get('/clientes/:id/areas', async (req, res) => {
   }
 });
 
-
 // AGREGAR ÁREA CON IMAGEN
 
-app.post('/clientes/:id/areas', upload.single('image'), async (req, res) => {
-
-  const {
-    nombre_area,
-    descripcion,
-    encargado,
-    contacto
-  } = req.body;
+app.post("/clientes/:id/areas", upload.single("image"), async (req, res) => {
+  const { nombre_area, descripcion, encargado, contacto } = req.body;
 
   try {
-
-    const imagePath = req.file
-      ? `/uploads/${req.file.filename}`
-      : null;
+    const imagePath = req.file ? `/uploads/${req.file.filename}` : null;
 
     const result = await db.query(
-
       `INSERT INTO areas_trabajo
       (
         cliente_id,
@@ -247,33 +188,24 @@ app.post('/clientes/:id/areas', upload.single('image'), async (req, res) => {
       VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *`,
 
-      [
-        req.params.id,
-        nombre_area,
-        descripcion,
-        encargado,
-        contacto,
-        imagePath
-      ]
+      [req.params.id, nombre_area, descripcion, encargado, contacto, imagePath],
     );
 
     res.json(result.rows[0]);
-
   } catch (err) {
-
     console.error(err);
 
     res.status(500).send("Error al registrar el área");
   }
 });
 
-
 // ------------------- PUESTOS ------------------- //
 
 // PUESTOS POR ÁREA
-app.get('/areas/:id/puestos', async (req, res) => {
+app.get("/areas/:id/puestos", async (req, res) => {
   try {
-    const result = await db.query(`
+    const result = await db.query(
+      `
       SELECT 
         p.id,
         p.puesto,
@@ -289,7 +221,9 @@ app.get('/areas/:id/puestos', async (req, res) => {
       LEFT JOIN equipo_proteccion e ON pe.epp_id = e.id
       WHERE p.area_id = $1
       GROUP BY p.id
-    `, [req.params.id]);
+    `,
+      [req.params.id],
+    );
 
     res.send(result.rows);
   } catch (err) {
@@ -297,10 +231,10 @@ app.get('/areas/:id/puestos', async (req, res) => {
   }
 });
 
-
 // AGREGAR PUESTO + riesgos + epp
-app.post('/areas/:id/puestos', async (req, res) => {
-  const { puesto, numero_usuarios, descripcion, riesgos, epp, criterio_epp } = req.body;
+app.post("/areas/:id/puestos", async (req, res) => {
+  const { puesto, numero_usuarios, descripcion, riesgos, epp, criterio_epp } =
+    req.body;
 
   try {
     const insertPuesto = await db.query(
@@ -313,20 +247,24 @@ app.post('/areas/:id/puestos', async (req, res) => {
         numero_usuarios,
         descripcion,
         riesgos?.[0] || null,
-        criterio_epp
-      ]
+        criterio_epp,
+      ],
     );
 
     const puestoId = insertPuesto.rows[0].id;
 
     if (riesgos?.length > 0) {
-      const values = riesgos.map(r => `(${puestoId}, ${r})`).join(',');
-      await db.query(`INSERT INTO puestos_riesgos (puesto_id, riesgo_id) VALUES ${values}`);
+      const values = riesgos.map((r) => `(${puestoId}, ${r})`).join(",");
+      await db.query(
+        `INSERT INTO puestos_riesgos (puesto_id, riesgo_id) VALUES ${values}`,
+      );
     }
 
     if (epp?.length > 0) {
-      const values = epp.map(e => `(${puestoId}, ${e})`).join(',');
-      await db.query(`INSERT INTO puestos_epp (puesto_id, epp_id) VALUES ${values}`);
+      const values = epp.map((e) => `(${puestoId}, ${e})`).join(",");
+      await db.query(
+        `INSERT INTO puestos_epp (puesto_id, epp_id) VALUES ${values}`,
+      );
     }
 
     res.send({ success: true });
@@ -335,45 +273,43 @@ app.post('/areas/:id/puestos', async (req, res) => {
   }
 });
 
-
 // ------------------- CATÁLOGOS ------------------- //
-app.get('/riesgos', async (req, res) => {
+app.get("/riesgos", async (req, res) => {
   try {
-    const result = await db.query('SELECT * FROM riesgos_laborales');
+    const result = await db.query("SELECT * FROM riesgos_laborales");
     res.send(result.rows);
   } catch (err) {
     res.status(500).send(err);
   }
 });
 
-app.get('/epp', async (req, res) => {
+app.get("/epp", async (req, res) => {
   try {
-    const result = await db.query('SELECT * FROM equipo_proteccion');
+    const result = await db.query("SELECT * FROM equipo_proteccion");
     res.send(result.rows);
   } catch (err) {
     res.status(500).send(err);
   }
 });
-
 
 // ------------------- NORMAS ------------------- //
-app.get('/normas', async (req, res) => {
+app.get("/normas", async (req, res) => {
   try {
-    const result = await db.query('SELECT * FROM normas');
+    const result = await db.query("SELECT * FROM normas");
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/puestos/:puestoId/normas', async (req, res) => {
+app.get("/puestos/:puestoId/normas", async (req, res) => {
   try {
     const result = await db.query(
       `SELECT n.*
        FROM puestos_normas pn
        JOIN normas n ON pn.norma_id = n.id
        WHERE pn.puesto_id = $1`,
-      [req.params.puestoId]
+      [req.params.puestoId],
     );
     res.json(result.rows);
   } catch (err) {
@@ -381,27 +317,26 @@ app.get('/puestos/:puestoId/normas', async (req, res) => {
   }
 });
 
-app.post('/puestos/:puestoId/normas', async (req, res) => {
+app.post("/puestos/:puestoId/normas", async (req, res) => {
   const { normaId } = req.body;
 
   try {
     await db.query(
-      'INSERT INTO puestos_normas (puesto_id, norma_id) VALUES ($1, $2)',
-      [req.params.puestoId, normaId]
+      "INSERT INTO puestos_normas (puesto_id, norma_id) VALUES ($1, $2)",
+      [req.params.puestoId, normaId],
     );
-    res.json({ message: 'Norma asignada correctamente' });
+    res.json({ message: "Norma asignada correctamente" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-
 // ------------------- SUBOPCIONES ------------------- //
-app.get('/nom-subopciones/:nom', async (req, res) => {
+app.get("/nom-subopciones/:nom", async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT * FROM nom_subopciones WHERE nom = $1',
-      [req.params.nom]
+      "SELECT * FROM nom_subopciones WHERE nom = $1",
+      [req.params.nom],
     );
     res.json(result.rows);
   } catch (err) {
@@ -409,24 +344,31 @@ app.get('/nom-subopciones/:nom', async (req, res) => {
   }
 });
 
-
 // ------------------- CUESTIONARIO CON IMAGEN ------------------- //
-app.post('/cuestionario', upload.single('image'), async (req, res) => {
+app.post("/cuestionario", upload.single("image"), async (req, res) => {
   let payload;
 
   try {
-    payload = JSON.parse(req.body.data || '{}');
+    payload = JSON.parse(req.body.data || "{}");
   } catch (e) {
-    return res.status(400).json({ error: 'Datos inválidos' });
+    return res.status(400).json({ error: "Datos inválidos" });
   }
 
-  const { puesto_id, nom, subopcion_id, respuestas, observaciones, recomendaciones, recomendaciones_epp } = payload;
+  const {
+    puesto_id,
+    nom,
+    subopcion_id,
+    respuestas,
+    observaciones,
+    recomendaciones,
+    recomendaciones_epp,
+  } = payload;
   const imagePath = req.file ? `/uploads/${req.file.filename}` : null;
 
   const client = await db.connect();
 
   try {
-    await client.query('BEGIN');
+    await client.query("BEGIN");
 
     const infoResult = await client.query(
       `INSERT INTO cuestionarios_info 
@@ -440,26 +382,31 @@ app.post('/cuestionario', upload.single('image'), async (req, res) => {
         observaciones || null,
         recomendaciones || null,
         recomendaciones_epp || null,
-        imagePath
-      ]
+        imagePath,
+      ],
     );
 
     const infoId = infoResult.rows[0].id;
 
-    const values = respuestas.map(r =>
-      `(${puesto_id}, '${nom}', ${subopcion_id}, ${infoId}, '${r.pregunta}', '${r.respuesta}')`
-    ).join(',');
+    const values = respuestas
+      .map(
+        (r) =>
+          `(${puesto_id}, '${nom}', ${subopcion_id}, ${infoId}, '${r.pregunta}', '${r.respuesta}')`,
+      )
+      .join(",");
 
     await client.query(
       `INSERT INTO cuestionarios (puesto_id, nom, subopcion_id, info_id, pregunta, respuesta)
-       VALUES ${values}`
+       VALUES ${values}`,
     );
 
-    await client.query('COMMIT');
-    res.json({ message: 'Cuestionario guardado correctamente', info_id: infoId });
-
+    await client.query("COMMIT");
+    res.json({
+      message: "Cuestionario guardado correctamente",
+      info_id: infoId,
+    });
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query("ROLLBACK");
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
@@ -468,31 +415,20 @@ app.post('/cuestionario', upload.single('image'), async (req, res) => {
 
 // SUBIR DOCUMENTOS (ARP / FICHA)
 
-app.post(
-  "/documentos",
-  upload.single("archivo"),
-  async (req, res) => {
+app.post("/documentos", upload.single("archivo"), async (req, res) => {
+  try {
+    const { cuestionario_info_id, tipo } = req.body;
 
-    try {
+    if (!req.file) {
+      return res.status(400).json({
+        error: "No se recibió archivo",
+      });
+    }
 
-      const {
-        cuestionario_info_id,
-        tipo
-      } = req.body;
+    const ruta = `/uploads/${req.file.filename}`;
 
-      if (!req.file) {
-
-        return res.status(400).json({
-          error: "No se recibió archivo"
-        });
-
-      }
-
-      const ruta = `/uploads/${req.file.filename}`;
-
-      const result = await db.query(
-
-        `INSERT INTO documentos_cuestionario
+    const result = await db.query(
+      `INSERT INTO documentos_cuestionario
         (
           cuestionario_info_id,
           tipo,
@@ -501,36 +437,25 @@ app.post(
         VALUES ($1,$2,$3)
         RETURNING *`,
 
-        [
-          cuestionario_info_id,
-          tipo,
-          ruta
-        ]
+      [cuestionario_info_id, tipo, ruta],
+    );
 
-      );
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.log(error);
 
-      res.json(result.rows[0]);
-
-    } catch (error) {
-
-      console.log(error);
-
-      res.status(500).json({
-        error: error.message
-      });
-
-    }
-
+    res.status(500).json({
+      error: error.message,
+    });
   }
-);
-
+});
 
 // PREGUNTAS POR SUBOPCIÓN
-app.get('/preguntas/:subopcion_tipo', async (req, res) => {
+app.get("/preguntas/:subopcion_tipo", async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT * FROM cuestionario_preguntas WHERE subopcion_tipo = $1',
-      [req.params.subopcion_tipo]
+      "SELECT * FROM cuestionario_preguntas WHERE subopcion_tipo = $1",
+      [req.params.subopcion_tipo],
     );
     res.json(result.rows);
   } catch (err) {
@@ -538,27 +463,28 @@ app.get('/preguntas/:subopcion_tipo', async (req, res) => {
   }
 });
 
-
 // INFO ADICIONAL
-app.get('/cuestionarios-info/:puesto_id/:nom/:subopcion_id', async (req, res) => {
-  try {
-    const result = await db.query(
-      'SELECT * FROM cuestionarios_info WHERE puesto_id = $1 AND nom = $2 AND subopcion_id = $3',
-      [req.params.puesto_id, req.params.nom, req.params.subopcion_id]
-    );
-    res.json(result.rows[0] || null);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
+app.get(
+  "/cuestionarios-info/:puesto_id/:nom/:subopcion_id",
+  async (req, res) => {
+    try {
+      const result = await db.query(
+        "SELECT * FROM cuestionarios_info WHERE puesto_id = $1 AND nom = $2 AND subopcion_id = $3",
+        [req.params.puesto_id, req.params.nom, req.params.subopcion_id],
+      );
+      res.json(result.rows[0] || null);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // OBTENER PUESTO INDIVIDUAL
-app.get('/puestos/:id', async (req, res) => {
+app.get("/puestos/:id", async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT * FROM puestos_trabajo WHERE id = $1',
-      [req.params.id]
+      "SELECT * FROM puestos_trabajo WHERE id = $1",
+      [req.params.id],
     );
     res.send(result.rows[0] || null);
   } catch (err) {
@@ -566,44 +492,41 @@ app.get('/puestos/:id', async (req, res) => {
   }
 });
 
-
 // CUESTIONARIO COMPLETO POR ID
-app.get('/cuestionario-completo/:info_id', async (req, res) => {
+app.get("/cuestionario-completo/:info_id", async (req, res) => {
   try {
     const info = await db.query(
-      'SELECT * FROM cuestionarios_info WHERE id = $1',
-      [req.params.info_id]
+      "SELECT * FROM cuestionarios_info WHERE id = $1",
+      [req.params.info_id],
     );
 
-    if (info.rows.length === 0)
-      return res.json({ info: null, respuestas: [] });
+    if (info.rows.length === 0) return res.json({ info: null, respuestas: [] });
 
     const respuestas = await db.query(
-      'SELECT pregunta, respuesta FROM cuestionarios WHERE info_id = $1 ORDER BY id',
-      [req.params.info_id]
+      "SELECT pregunta, respuesta FROM cuestionarios WHERE info_id = $1 ORDER BY id",
+      [req.params.info_id],
     );
 
     res.json({
       info: {
-        observaciones: info.rows[0].observaciones || 'N/A',
-        recomendaciones: info.rows[0].recomendaciones || 'N/A',
-        recomendaciones_epp: info.rows[0].recomendaciones_epp || 'N/A',
+        observaciones: info.rows[0].observaciones || "N/A",
+        recomendaciones: info.rows[0].recomendaciones || "N/A",
+        recomendaciones_epp: info.rows[0].recomendaciones_epp || "N/A",
         image: info.rows[0].image || null,
-        created_at: info.rows[0].created_at
+        created_at: info.rows[0].created_at,
       },
-      respuestas: respuestas.rows
+      respuestas: respuestas.rows,
     });
-
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-
 // LISTA DE CUESTIONARIOS POR PUESTO
-app.get('/puestos/:id/cuestionarios', async (req, res) => {
+app.get("/puestos/:id/cuestionarios", async (req, res) => {
   try {
-    const result = await db.query(`
+    const result = await db.query(
+      `
       SELECT 
         ci.id,
         ci.puesto_id,
@@ -619,10 +542,11 @@ app.get('/puestos/:id/cuestionarios', async (req, res) => {
       WHERE ci.puesto_id = $1
       GROUP BY ci.id, ns.subopcion
       ORDER BY ci.created_at DESC
-    `, [req.params.id]);
+    `,
+      [req.params.id],
+    );
 
     res.json(result.rows);
-
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -643,29 +567,58 @@ app.get("/reporte-consolidado", async (req, res) => {
 
     const sql = `
       SELECT
-        c.id AS cliente_id,
-        c.nombre_empresa AS cliente_nombre,
-        a.id AS area_id,
-        a.nombre_area AS area_nombre,
-        p.id AS puesto_id,
-        p.puesto AS puesto_nombre,
-        ci.id AS info_id,
-        ci.nom,
-        ci.created_at,
-          ci.observaciones AS naturaleza_emision,
-  ci.recomendaciones AS descripcion_operacion,
-  ci.recomendaciones_epp AS epp_recomendado,
-        ns.subopcion,
-        q.pregunta,
-        q.respuesta
-      FROM puestos_trabajo p
-      JOIN areas_trabajo a ON a.id = p.area_id
-      JOIN clientes c ON c.id = a.cliente_id
-      JOIN cuestionarios_info ci ON ci.puesto_id = p.id
-      JOIN cuestionarios q ON q.info_id = ci.id
-      LEFT JOIN nom_subopciones ns ON ns.id = ci.subopcion_id
-      WHERE p.id = $1
-      ORDER BY ci.created_at;
+    c.id AS cliente_id,
+    c.nombre_empresa AS cliente_nombre,
+    a.id AS area_id,
+    a.nombre_area AS area_nombre,
+    p.id AS puesto_id,
+    p.puesto AS puesto_nombre,
+
+    ci.id AS info_id,
+    ci.nom,
+    ci.created_at,
+    ci.image,
+
+    arp.archivo AS arp,
+    ficha.archivo AS ficha,
+
+    ci.observaciones AS naturaleza_emision,
+    ci.recomendaciones AS descripcion_operacion,
+    ci.recomendaciones_epp AS epp_recomendado,
+
+    ns.subopcion,
+
+    q.pregunta,
+    q.respuesta
+
+FROM puestos_trabajo p
+
+JOIN areas_trabajo a
+ON a.id=p.area_id
+
+JOIN clientes c
+ON c.id=a.cliente_id
+
+JOIN cuestionarios_info ci
+ON ci.puesto_id=p.id
+
+JOIN cuestionarios q
+ON q.info_id=ci.id
+
+LEFT JOIN nom_subopciones ns
+ON ns.id=ci.subopcion_id
+
+LEFT JOIN documentos_cuestionario arp
+ON arp.cuestionario_info_id=ci.id
+AND arp.tipo='ARP'
+
+LEFT JOIN documentos_cuestionario ficha
+ON ficha.cuestionario_info_id=ci.id
+AND ficha.tipo='FICHA'
+
+WHERE p.id=$1
+
+ORDER BY ci.created_at;
     `;
 
     const { rows } = await db.query(sql, [puestoId]);
@@ -675,73 +628,85 @@ app.get("/reporte-consolidado", async (req, res) => {
     console.error("❌ Error reporte consolidado:", error.message);
     res.status(500).json({
       message: "Error interno en reporte consolidado",
-      error: error.message
+      error: error.message,
     });
   }
 });
 
 // ------------------- ELIMINAR CLIENTE COMPLETO -------------------
-app.delete('/clientes/:id', async (req, res) => {
+app.delete("/clientes/:id", async (req, res) => {
   const clienteId = req.params.id;
   const client = await db.connect();
 
   try {
-    await client.query('BEGIN');
+    await client.query("BEGIN");
 
     // 1️⃣ Obtener áreas del cliente
     const areas = await client.query(
-      'SELECT id FROM areas_trabajo WHERE cliente_id = $1',
-      [clienteId]
+      "SELECT id FROM areas_trabajo WHERE cliente_id = $1",
+      [clienteId],
     );
 
     for (const area of areas.rows) {
       // 2️⃣ Obtener puestos del área
       const puestos = await client.query(
-        'SELECT id FROM puestos_trabajo WHERE area_id = $1',
-        [area.id]
+        "SELECT id FROM puestos_trabajo WHERE area_id = $1",
+        [area.id],
       );
 
       for (const puesto of puestos.rows) {
         // 3️⃣ Eliminar relaciones del puesto
-        await client.query('DELETE FROM puestos_riesgos WHERE puesto_id = $1', [puesto.id]);
-        await client.query('DELETE FROM puestos_epp WHERE puesto_id = $1', [puesto.id]);
-        await client.query('DELETE FROM puestos_normas WHERE puesto_id = $1', [puesto.id]);
+        await client.query("DELETE FROM puestos_riesgos WHERE puesto_id = $1", [
+          puesto.id,
+        ]);
+        await client.query("DELETE FROM puestos_epp WHERE puesto_id = $1", [
+          puesto.id,
+        ]);
+        await client.query("DELETE FROM puestos_normas WHERE puesto_id = $1", [
+          puesto.id,
+        ]);
 
         // 4️⃣ Obtener cuestionarios_info
         const infos = await client.query(
-          'SELECT id FROM cuestionarios_info WHERE puesto_id = $1',
-          [puesto.id]
+          "SELECT id FROM cuestionarios_info WHERE puesto_id = $1",
+          [puesto.id],
         );
 
         for (const info of infos.rows) {
           // 5️⃣ Eliminar respuestas
-          await client.query('DELETE FROM cuestionarios WHERE info_id = $1', [info.id]);
+          await client.query("DELETE FROM cuestionarios WHERE info_id = $1", [
+            info.id,
+          ]);
         }
 
         // 6️⃣ Eliminar info cuestionarios
-        await client.query('DELETE FROM cuestionarios_info WHERE puesto_id = $1', [puesto.id]);
+        await client.query(
+          "DELETE FROM cuestionarios_info WHERE puesto_id = $1",
+          [puesto.id],
+        );
 
         // 7️⃣ Eliminar puesto
-        await client.query('DELETE FROM puestos_trabajo WHERE id = $1', [puesto.id]);
+        await client.query("DELETE FROM puestos_trabajo WHERE id = $1", [
+          puesto.id,
+        ]);
       }
 
       // 8️⃣ Eliminar área
-      await client.query('DELETE FROM areas_trabajo WHERE id = $1', [area.id]);
+      await client.query("DELETE FROM areas_trabajo WHERE id = $1", [area.id]);
     }
 
     // 9️⃣ Eliminar cliente
-    await client.query('DELETE FROM clientes WHERE id = $1', [clienteId]);
+    await client.query("DELETE FROM clientes WHERE id = $1", [clienteId]);
 
-    await client.query('COMMIT');
+    await client.query("COMMIT");
 
-    res.json({ success: true, message: 'Cliente eliminado correctamente' });
-
+    res.json({ success: true, message: "Cliente eliminado correctamente" });
   } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('❌ Error eliminando cliente:', error);
+    await client.query("ROLLBACK");
+    console.error("❌ Error eliminando cliente:", error);
     res.status(500).json({
       success: false,
-      message: 'Error eliminando cliente'
+      message: "Error eliminando cliente",
     });
   } finally {
     client.release();
@@ -750,10 +715,8 @@ app.delete('/clientes/:id', async (req, res) => {
 
 //Crear inventario
 
-app.post('/inventario', async (req, res) => {
-
+app.post("/inventario", async (req, res) => {
   try {
-
     const {
       clave_producto,
       nombre_producto,
@@ -763,7 +726,7 @@ app.post('/inventario', async (req, res) => {
       usuario_id,
       cliente_id,
       area_id,
-      puesto_id
+      puesto_id,
     } = req.body;
 
     const result = await db.query(
@@ -791,29 +754,23 @@ app.post('/inventario', async (req, res) => {
         usuario_id,
         cliente_id,
         area_id,
-        puesto_id
-      ]
+        puesto_id,
+      ],
     );
 
     res.json(result.rows[0]);
-
   } catch (error) {
-
     console.log(error);
 
     res.status(500).json({
-      error: error.message
+      error: error.message,
     });
-
   }
-
 });
 
 //Listar Inventario
-app.get('/inventario/:clienteId', async (req, res) => {
-
+app.get("/inventario/:clienteId", async (req, res) => {
   try {
-
     const result = await db.query(
       `
       SELECT
@@ -828,33 +785,27 @@ app.get('/inventario/:clienteId', async (req, res) => {
       WHERE i.cliente_id = $1
       ORDER BY i.id DESC
       `,
-      [req.params.clienteId]
+      [req.params.clienteId],
     );
 
     res.json(result.rows);
-
   } catch (error) {
-
     console.log(error);
 
     res.status(500).json({
-      error: error.message
+      error: error.message,
     });
-
   }
-
 });
 
-app.put('/inventario/:id', async (req, res) => {
-
+app.put("/inventario/:id", async (req, res) => {
   try {
-
     const {
       clave_producto,
       nombre_producto,
       cantidad_min,
       cantidad_max,
-      cantidad_total
+      cantidad_total,
     } = req.body;
 
     const result = await db.query(
@@ -875,25 +826,21 @@ app.put('/inventario/:id', async (req, res) => {
         cantidad_min,
         cantidad_max,
         cantidad_total,
-        req.params.id
-      ]
+        req.params.id,
+      ],
     );
 
     res.json(result.rows[0]);
-
   } catch (error) {
-
     console.log(error);
 
     res.status(500).json({
-      error: error.message
+      error: error.message,
     });
-
   }
-
 });
 
 // ------------------- INICIAR SERVIDOR -------------------
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
 });
