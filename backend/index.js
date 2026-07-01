@@ -449,8 +449,18 @@ app.post("/cuestionario", upload.single("image"), async (req, res) => {
 
 // SUBIR DOCUMENTOS (ARP / FICHA)
 
-app.post("/documentos", upload.single("archivo"), async (req, res) => {
-  try {
+app.post(
+  "/documentos",
+  upload.single("archivo"),
+  async (req, res) => {
+
+    console.log("BODY:");
+    console.log(req.body);
+
+    console.log("FILE:");
+    console.log(req.file);
+
+    try {
     const { cuestionario_info_id, tipo } = req.body;
 
     if (!req.file) {
