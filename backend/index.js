@@ -346,11 +346,16 @@ app.get("/nom-subopciones/:nom", async (req, res) => {
 
 // ------------------- CUESTIONARIO CON IMAGEN ------------------- //
 app.post("/cuestionario", upload.single("image"), async (req, res) => {
+
+  console.log("===== INICIO /cuestionario =====");
+
   let payload;
 
   try {
     payload = JSON.parse(req.body.data || "{}");
+    console.log("Payload recibido:", payload);
   } catch (e) {
+    console.log("Error parseando payload:", e);
     return res.status(400).json({ error: "Datos inválidos" });
   }
 
@@ -363,17 +368,24 @@ app.post("/cuestionario", upload.single("image"), async (req, res) => {
     recomendaciones,
     recomendaciones_epp,
   } = payload;
+
+  console.log("Imagen:", req.file);
+
   const imagePath = req.file ? `/uploads/${req.file.filename}` : null;
 
   const client = await db.connect();
 
   try {
+
+    console.log("BEGIN");
     await client.query("BEGIN");
 
+    console.log("Insertando cuestionarios_info");
+
     const infoResult = await client.query(
-      `INSERT INTO cuestionarios_info 
+      `INSERT INTO cuestionarios_info
       (puesto_id, nom, subopcion_id, observaciones, recomendaciones, recomendaciones_epp, image)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
       RETURNING id`,
       [
         puesto_id,
@@ -383,43 +395,56 @@ app.post("/cuestionario", upload.single("image"), async (req, res) => {
         recomendaciones || null,
         recomendaciones_epp || null,
         imagePath,
-      ],
+      ]
     );
+
+    console.log("Insert OK");
 
     const infoId = infoResult.rows[0].id;
 
+    console.log("infoId:", infoId);
+
     const values = respuestas
       .map(
-        (r) =>
-          `(${puesto_id}, '${nom}', ${subopcion_id}, ${infoId}, '${r.pregunta}', '${r.respuesta}')`,
+        r =>
+          `(${puesto_id}, '${nom}', ${subopcion_id}, ${infoId}, '${r.pregunta}', '${r.respuesta}')`
       )
       .join(",");
 
+    console.log("Insertando respuestas");
+
     await client.query(
-      `INSERT INTO cuestionarios (puesto_id, nom, subopcion_id, info_id, pregunta, respuesta)
-       VALUES ${values}`,
+      `INSERT INTO cuestionarios
+      (puesto_id, nom, subopcion_id, info_id, pregunta, respuesta)
+      VALUES ${values}`
     );
 
+    console.log("COMMIT");
+
     await client.query("COMMIT");
+
     res.json({
-      message: "Cuestionario guardado correctamente",
-      info_id: infoId,
+      message: "ok",
+      info_id: infoId
     });
+
   } catch (err) {
 
-  await client.query("ROLLBACK");
+    console.log("ERROR SQL");
+    console.log(err);
 
-  console.log("============== ERROR CUESTIONARIO ==============");
-  console.log(err);
-  console.log("===============================================");
+    await client.query("ROLLBACK");
 
-  res.status(500).json({
-    error: err.message
-  });
+    res.status(500).json({
+      error: err.message
+    });
 
   } finally {
+
     client.release();
+
   }
+
 });
 
 // SUBIR DOCUMENTOS (ARP / FICHA)
