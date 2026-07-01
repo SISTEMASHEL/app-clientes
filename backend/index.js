@@ -406,8 +406,17 @@ app.post("/cuestionario", upload.single("image"), async (req, res) => {
       info_id: infoId,
     });
   } catch (err) {
-    await client.query("ROLLBACK");
-    res.status(500).json({ error: err.message });
+
+  await client.query("ROLLBACK");
+
+  console.log("============== ERROR CUESTIONARIO ==============");
+  console.log(err);
+  console.log("===============================================");
+
+  res.status(500).json({
+    error: err.message
+  });
+
   } finally {
     client.release();
   }
