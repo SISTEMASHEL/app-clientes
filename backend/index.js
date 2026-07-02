@@ -370,6 +370,8 @@ app.post("/cuestionario", upload.single("image"), async (req, res) => {
   } = payload;
 
   console.log("Imagen:", req.file);
+  console.log("req.body:", req.body);
+  console.log("req.file:", req.file);
 
   const imagePath = req.file ? `/uploads/${req.file.filename}` : null;
 
