@@ -6,7 +6,7 @@ const bodyParser = require("body-parser");
 const { Pool } = require("pg");
 const path = require("path");
 const multer = require("multer");
-const __dirname = path.resolve();
+
 
 const app = express();
 
