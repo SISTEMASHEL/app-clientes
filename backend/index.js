@@ -6,7 +6,7 @@ const bodyParser = require("body-parser");
 const { Pool } = require("pg");
 const path = require("path");
 const multer = require("multer");
-
+const fs = require("fs"); // ✅ AÑADIDO
 
 const app = express();
 
@@ -20,13 +20,13 @@ const PORT = process.env.PORT || 3001;
 // CORS
 app.use(
   cors({
-    origin: "*", // en producción usa el dominio real de tu frontend
+    origin: "*",
   }),
 );
 
 app.use(bodyParser.json());
 
-// ------------------- POSTGRESQL POOL (Render-compatible) -------------------
+// ------------------- POSTGRESQL POOL -------------------
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
@@ -45,18 +45,27 @@ const db = new Pool({
   }
 })();
 
-// ------------------- CARPETA PÚBLICA PARA IMÁGENES -------------------
+// ------------------- 📁 FIX IMPORTANTE: UPLOADS UNIFICADO -------------------
 
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+const uploadsDir = path.join(process.cwd(), "uploads");
 
+// ✅ asegurar que exista en Render/local
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Servir archivos estáticos
+app.use("/uploads", express.static(uploadsDir));
+
+// Test directo
 app.get("/test-upload", (req, res) => {
-  res.sendFile(path.join(process.cwd(), "uploads", "1783093855682.jpg"));
+  res.sendFile(path.join(uploadsDir, "1783093855682.jpg"));
 });
 
-// ------------------- MULTER PARA SUBIR IMÁGENES -------------------
+// ------------------- MULTER CORREGIDO -------------------
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, path.join(__dirname, "uploads/"));
+    cb(null, uploadsDir); // ✅ MISMA CARPETA QUE EXPRESS
   },
   filename: function (req, file, cb) {
     const ext = path.extname(file.originalname);
@@ -84,7 +93,7 @@ const upload = multer({
   fileFilter,
 });
 
-// ------------------- RUTAS ------------------- //
+// ------------------- RUTAS (TODO IGUAL) -------------------
 
 // LOGIN
 app.post("/login", async (req, res) => {
@@ -96,22 +105,13 @@ app.post("/login", async (req, res) => {
       [usuario, password],
     );
 
-    if (result.rows.length > 0) {
-      res.json({
-        success: true,
-        usuario: result.rows[0],
-      });
-    } else {
-      res.json({
-        success: false,
-      });
-    }
+    res.json({
+      success: result.rows.length > 0,
+      usuario: result.rows[0] || null,
+    });
   } catch (error) {
     console.log(error);
-
-    res.status(500).json({
-      success: false,
-    });
+    res.status(500).json({ success: false });
   }
 });
 
@@ -128,35 +128,25 @@ app.post("/cliente", async (req, res) => {
       [nombre_empresa, nombre, telefono, direccion, puesto, usuario_id],
     );
 
-    res.json({
-      success: true,
-    });
+    res.json({ success: true });
   } catch (error) {
     console.log(error);
-
-    res.status(500).json({
-      success: false,
-    });
+    res.status(500).json({ success: false });
   }
 });
 
 // OBTENER CLIENTES
 app.get("/clientes/:usuarioId", async (req, res) => {
   try {
-    const { usuarioId } = req.params;
-
     const result = await db.query(
       "SELECT * FROM clientes WHERE usuario_id = $1 ORDER BY id DESC",
-      [usuarioId],
+      [req.params.usuarioId],
     );
 
     res.json(result.rows);
   } catch (error) {
     console.log(error);
-
-    res.status(500).json({
-      error: "Error al obtener clientes",
-    });
+    res.status(500).json({ error: "Error al obtener clientes" });
   }
 });
 
@@ -174,7 +164,6 @@ app.get("/clientes/:id/areas", async (req, res) => {
 });
 
 // AGREGAR ÁREA CON IMAGEN
-
 app.post("/clientes/:id/areas", upload.single("image"), async (req, res) => {
   const { nombre_area, descripcion, encargado, contacto } = req.body;
 
@@ -183,27 +172,25 @@ app.post("/clientes/:id/areas", upload.single("image"), async (req, res) => {
 
     const result = await db.query(
       `INSERT INTO areas_trabajo
-      (
-        cliente_id,
-        nombre_area,
-        descripcion,
-        encargado,
-        contacto,
-        image
-      )
+      (cliente_id, nombre_area, descripcion, encargado, contacto, image)
       VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *`,
-
       [req.params.id, nombre_area, descripcion, encargado, contacto, imagePath],
     );
 
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
-
     res.status(500).send("Error al registrar el área");
   }
 });
+
+// ------------------- EL RESTO DE TUS RUTAS SIGUEN IGUAL -------------------
+// (NO SE ELIMINÓ NINGUNA)
+
+// ... TODO TU CÓDIGO ORIGINAL AQUÍ SIN CAMBIOS ...
+
+// ------------------- INICIAR SERVIDOR -------------------
 
 // ------------------- PUESTOS ------------------- //
 
