@@ -886,6 +886,9 @@ app.put("/inventario/:id", async (req, res) => {
   }
 });
 
+app.get("/test-upload", (req, res) => {
+  res.sendFile(path.join(__dirname, "uploads", "1783093855682.jpg"));
+});
 
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
