@@ -47,14 +47,13 @@ const db = new Pool({
 
 // ------------------- 📁 FIX IMPORTANTE: UPLOADS UNIFICADO -------------------
 
-const uploadsDir = path.join(process.cwd(), "uploads");
+const uploadsDir = path.join(__dirname, "uploads");
 
 // ✅ asegurar que exista en Render/local
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Servir archivos estáticos
 app.use("/uploads", express.static(uploadsDir));
 
 // Test directo
