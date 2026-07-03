@@ -886,6 +886,117 @@ app.put("/inventario/:id", async (req, res) => {
   }
 });
 
+const puppeteer = require("puppeteer");
+
+// ===============================
+// GENERAR PDF DESDE BACKEND
+// ===============================
+app.post("/pdf/cuestionario", async (req, res) => {
+  try {
+    const { info_id } = req.body;
+
+    if (!info_id) {
+      return res.status(400).json({ error: "info_id requerido" });
+    }
+
+    // ===============================
+    // 1. TRAER INFO
+    // ===============================
+    const infoRes = await db.query(
+      `SELECT * FROM cuestionarios_info WHERE id = $1`,
+      [info_id],
+    );
+
+    if (infoRes.rows.length === 0) {
+      return res.status(404).json({ error: "No existe cuestionario" });
+    }
+
+    const info = infoRes.rows[0];
+
+    // ===============================
+    // 2. RESPUESTAS
+    // ===============================
+    const respuestasRes = await db.query(
+      `SELECT pregunta, respuesta FROM cuestionarios WHERE info_id = $1`,
+      [info_id],
+    );
+
+    const respuestasHTML = respuestasRes.rows
+      .map(
+        (r) => `
+        <tr>
+          <td>${r.pregunta}</td>
+          <td>${r.respuesta}</td>
+        </tr>`
+      )
+      .join("");
+
+    // ===============================
+    // 3. HTML
+    // ===============================
+    const html = `
+    <html>
+    <head>
+      <style>
+        body { font-family: Arial; font-size: 12px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid black; padding: 6px; }
+        h1 { text-align:center; }
+      </style>
+    </head>
+
+    <body>
+
+      <h1>REPORTE NOM</h1>
+
+      <p><b>Puesto:</b> ${info.puesto_id}</p>
+      <p><b>NOM:</b> ${info.nom}</p>
+      <p><b>Subopción:</b> ${info.subopcion_id}</p>
+
+      <h2>Respuestas</h2>
+
+      <table>
+        <tr>
+          <th>Pregunta</th>
+          <th>Respuesta</th>
+        </tr>
+        ${respuestasHTML}
+      </table>
+
+    </body>
+    </html>
+    `;
+
+    // ===============================
+    // 4. GENERAR PDF
+    // ===============================
+    const browser = await puppeteer.launch({
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "networkidle0" });
+
+    const pdfBuffer = await page.pdf({
+      format: "A4",
+      printBackground: true,
+    });
+
+    await browser.close();
+
+    // ===============================
+    // 5. RESPUESTA PDF
+    // ===============================
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "attachment; filename=reporte.pdf");
+
+    return res.send(pdfBuffer);
+  } catch (error) {
+    console.log("ERROR PDF BACKEND:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
