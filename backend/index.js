@@ -6,6 +6,7 @@ const bodyParser = require("body-parser");
 const { Pool } = require("pg");
 const path = require("path");
 const multer = require("multer");
+const __dirname = path.resolve();
 
 const app = express();
 
@@ -45,7 +46,12 @@ const db = new Pool({
 })();
 
 // ------------------- CARPETA PÚBLICA PARA IMÁGENES -------------------
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
+app.get("/test-upload", (req, res) => {
+  res.sendFile(path.join(process.cwd(), "uploads", "1783093855682.jpg"));
+});
 
 // ------------------- MULTER PARA SUBIR IMÁGENES -------------------
 const storage = multer.diskStorage({
@@ -886,9 +892,6 @@ app.put("/inventario/:id", async (req, res) => {
   }
 });
 
-app.get("/test-upload", (req, res) => {
-  res.sendFile(path.join(__dirname, "uploads", "1783093855682.jpg"));
-});
 
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
