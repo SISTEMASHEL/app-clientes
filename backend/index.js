@@ -668,6 +668,7 @@ ORDER BY ci.created_at;
 });
 
 // ------------------- ELIMINAR CLIENTE COMPLETO -------------------
+// ------------------- ELIMINAR CLIENTE COMPLETO -------------------
 app.delete("/clientes/:id", async (req, res) => {
   const clienteId = req.params.id;
   const client = await db.connect();
@@ -675,75 +676,116 @@ app.delete("/clientes/:id", async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    // ✅ Eliminar inventario relacionado con el cliente
+    await client.query(
+      "DELETE FROM inventario WHERE cliente_id = $1",
+      [clienteId]
+    );
+
     // 1️⃣ Obtener áreas del cliente
     const areas = await client.query(
       "SELECT id FROM areas_trabajo WHERE cliente_id = $1",
-      [clienteId],
+      [clienteId]
     );
 
     for (const area of areas.rows) {
+
       // 2️⃣ Obtener puestos del área
       const puestos = await client.query(
         "SELECT id FROM puestos_trabajo WHERE area_id = $1",
-        [area.id],
+        [area.id]
       );
 
       for (const puesto of puestos.rows) {
+
         // 3️⃣ Eliminar relaciones del puesto
-        await client.query("DELETE FROM puestos_riesgos WHERE puesto_id = $1", [
-          puesto.id,
-        ]);
-        await client.query("DELETE FROM puestos_epp WHERE puesto_id = $1", [
-          puesto.id,
-        ]);
-        await client.query("DELETE FROM puestos_normas WHERE puesto_id = $1", [
-          puesto.id,
-        ]);
+        await client.query(
+          "DELETE FROM puestos_riesgos WHERE puesto_id = $1",
+          [puesto.id]
+        );
+
+        await client.query(
+          "DELETE FROM puestos_epp WHERE puesto_id = $1",
+          [puesto.id]
+        );
+
+        await client.query(
+          "DELETE FROM puestos_normas WHERE puesto_id = $1",
+          [puesto.id]
+        );
 
         // 4️⃣ Obtener cuestionarios_info
         const infos = await client.query(
           "SELECT id FROM cuestionarios_info WHERE puesto_id = $1",
-          [puesto.id],
+          [puesto.id]
         );
 
         for (const info of infos.rows) {
+
           // 5️⃣ Eliminar respuestas
-          await client.query("DELETE FROM cuestionarios WHERE info_id = $1", [
-            info.id,
-          ]);
+          await client.query(
+            "DELETE FROM cuestionarios WHERE info_id = $1",
+            [info.id]
+          );
+
+          // ✅ Eliminar documentos del cuestionario
+          await client.query(
+            "DELETE FROM documentos_cuestionario WHERE cuestionario_info_id = $1",
+            [info.id]
+          );
         }
 
         // 6️⃣ Eliminar info cuestionarios
         await client.query(
           "DELETE FROM cuestionarios_info WHERE puesto_id = $1",
-          [puesto.id],
+          [puesto.id]
         );
 
         // 7️⃣ Eliminar puesto
-        await client.query("DELETE FROM puestos_trabajo WHERE id = $1", [
-          puesto.id,
-        ]);
+        await client.query(
+          "DELETE FROM puestos_trabajo WHERE id = $1",
+          [puesto.id]
+        );
       }
 
       // 8️⃣ Eliminar área
-      await client.query("DELETE FROM areas_trabajo WHERE id = $1", [area.id]);
+      await client.query(
+        "DELETE FROM areas_trabajo WHERE id = $1",
+        [area.id]
+      );
     }
 
     // 9️⃣ Eliminar cliente
-    await client.query("DELETE FROM clientes WHERE id = $1", [clienteId]);
+    await client.query(
+      "DELETE FROM clientes WHERE id = $1",
+      [clienteId]
+    );
 
     await client.query("COMMIT");
 
-    res.json({ success: true, message: "Cliente eliminado correctamente" });
+    res.json({
+      success: true,
+      message: "Cliente eliminado correctamente",
+    });
+
   } catch (error) {
+
     await client.query("ROLLBACK");
+
     console.error("❌ Error eliminando cliente:", error);
+
     res.status(500).json({
       success: false,
-      message: "Error eliminando cliente",
+      message: error.message,
+      detail: error.detail,
+      table: error.table,
+      constraint: error.constraint,
     });
+
   } finally {
+
     client.release();
+
   }
 });
 
