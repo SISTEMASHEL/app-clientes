@@ -10,7 +10,6 @@ const fs = require("fs"); // ✅ AÑADIDO
 
 const app = express();
 
-
 const PORT = process.env.PORT || 3001;
 
 // CORS
@@ -344,7 +343,6 @@ app.get("/nom-subopciones/:nom", async (req, res) => {
 
 // ------------------- CUESTIONARIO CON IMAGEN ------------------- //
 app.post("/cuestionario", upload.single("image"), async (req, res) => {
-
   console.log("===== INICIO /cuestionario =====");
 
   let payload;
@@ -376,7 +374,6 @@ app.post("/cuestionario", upload.single("image"), async (req, res) => {
   const client = await db.connect();
 
   try {
-
     console.log("BEGIN");
     await client.query("BEGIN");
 
@@ -395,7 +392,7 @@ app.post("/cuestionario", upload.single("image"), async (req, res) => {
         recomendaciones || null,
         recomendaciones_epp || null,
         imagePath,
-      ]
+      ],
     );
 
     console.log("Insert OK");
@@ -406,8 +403,8 @@ app.post("/cuestionario", upload.single("image"), async (req, res) => {
 
     const values = respuestas
       .map(
-        r =>
-          `(${puesto_id}, '${nom}', ${subopcion_id}, ${infoId}, '${r.pregunta}', '${r.respuesta}')`
+        (r) =>
+          `(${puesto_id}, '${nom}', ${subopcion_id}, ${infoId}, '${r.pregunta}', '${r.respuesta}')`,
       )
       .join(",");
 
@@ -416,7 +413,7 @@ app.post("/cuestionario", upload.single("image"), async (req, res) => {
     await client.query(
       `INSERT INTO cuestionarios
       (puesto_id, nom, subopcion_id, info_id, pregunta, respuesta)
-      VALUES ${values}`
+      VALUES ${values}`,
     );
 
     console.log("COMMIT");
@@ -425,42 +422,32 @@ app.post("/cuestionario", upload.single("image"), async (req, res) => {
 
     res.json({
       message: "ok",
-      info_id: infoId
+      info_id: infoId,
     });
-
   } catch (err) {
-
     console.log("ERROR SQL");
     console.log(err);
 
     await client.query("ROLLBACK");
 
     res.status(500).json({
-      error: err.message
+      error: err.message,
     });
-
   } finally {
-
     client.release();
-
   }
-
 });
 
 // SUBIR DOCUMENTOS (ARP / FICHA)
 
-app.post(
-  "/documentos",
-  upload.single("archivo"),
-  async (req, res) => {
+app.post("/documentos", upload.single("archivo"), async (req, res) => {
+  console.log("BODY:");
+  console.log(req.body);
 
-    console.log("BODY:");
-    console.log(req.body);
+  console.log("FILE:");
+  console.log(req.file);
 
-    console.log("FILE:");
-    console.log(req.file);
-
-    try {
+  try {
     const { cuestionario_info_id, tipo } = req.body;
 
     if (!req.file) {
@@ -468,6 +455,18 @@ app.post(
         error: "No se recibió archivo",
       });
     }
+    console.log("Archivo recibido:");
+    console.log(req.file);
+
+    const ruta = `/uploads/${req.file.filename}`;
+
+    console.log("Ruta BD:", ruta);
+
+    const rutaFisica = path.join(uploadsDir, req.file.filename);
+
+    console.log("Ruta física:", rutaFisica);
+
+    console.log("¿Existe?", fs.existsSync(rutaFisica));
 
     const ruta = `/uploads/${req.file.filename}`;
 
@@ -687,89 +686,74 @@ app.delete("/clientes/:id", async (req, res) => {
     await client.query("BEGIN");
 
     // ✅ Eliminar inventario relacionado con el cliente
-    await client.query(
-      "DELETE FROM inventario WHERE cliente_id = $1",
-      [clienteId]
-    );
+    await client.query("DELETE FROM inventario WHERE cliente_id = $1", [
+      clienteId,
+    ]);
 
     // 1️⃣ Obtener áreas del cliente
     const areas = await client.query(
       "SELECT id FROM areas_trabajo WHERE cliente_id = $1",
-      [clienteId]
+      [clienteId],
     );
 
     for (const area of areas.rows) {
-
       // 2️⃣ Obtener puestos del área
       const puestos = await client.query(
         "SELECT id FROM puestos_trabajo WHERE area_id = $1",
-        [area.id]
+        [area.id],
       );
 
       for (const puesto of puestos.rows) {
-
         // 3️⃣ Eliminar relaciones del puesto
-        await client.query(
-          "DELETE FROM puestos_riesgos WHERE puesto_id = $1",
-          [puesto.id]
-        );
+        await client.query("DELETE FROM puestos_riesgos WHERE puesto_id = $1", [
+          puesto.id,
+        ]);
 
-        await client.query(
-          "DELETE FROM puestos_epp WHERE puesto_id = $1",
-          [puesto.id]
-        );
+        await client.query("DELETE FROM puestos_epp WHERE puesto_id = $1", [
+          puesto.id,
+        ]);
 
-        await client.query(
-          "DELETE FROM puestos_normas WHERE puesto_id = $1",
-          [puesto.id]
-        );
+        await client.query("DELETE FROM puestos_normas WHERE puesto_id = $1", [
+          puesto.id,
+        ]);
 
         // 4️⃣ Obtener cuestionarios_info
         const infos = await client.query(
           "SELECT id FROM cuestionarios_info WHERE puesto_id = $1",
-          [puesto.id]
+          [puesto.id],
         );
 
         for (const info of infos.rows) {
-
           // 5️⃣ Eliminar respuestas
-          await client.query(
-            "DELETE FROM cuestionarios WHERE info_id = $1",
-            [info.id]
-          );
+          await client.query("DELETE FROM cuestionarios WHERE info_id = $1", [
+            info.id,
+          ]);
 
           // ✅ Eliminar documentos del cuestionario
           await client.query(
             "DELETE FROM documentos_cuestionario WHERE cuestionario_info_id = $1",
-            [info.id]
+            [info.id],
           );
         }
 
         // 6️⃣ Eliminar info cuestionarios
         await client.query(
           "DELETE FROM cuestionarios_info WHERE puesto_id = $1",
-          [puesto.id]
+          [puesto.id],
         );
 
         // 7️⃣ Eliminar puesto
-        await client.query(
-          "DELETE FROM puestos_trabajo WHERE id = $1",
-          [puesto.id]
-        );
+        await client.query("DELETE FROM puestos_trabajo WHERE id = $1", [
+          puesto.id,
+        ]);
       }
 
       // 8️⃣ Eliminar área
-      await client.query(
-        "DELETE FROM areas_trabajo WHERE id = $1",
-        [area.id]
-      );
+      await client.query("DELETE FROM areas_trabajo WHERE id = $1", [area.id]);
     }
 
     // 9️⃣ Eliminar cliente
-    await client.query(
-      "DELETE FROM clientes WHERE id = $1",
-      [clienteId]
-    );
+    await client.query("DELETE FROM clientes WHERE id = $1", [clienteId]);
 
     await client.query("COMMIT");
 
@@ -777,9 +761,7 @@ app.delete("/clientes/:id", async (req, res) => {
       success: true,
       message: "Cliente eliminado correctamente",
     });
-
   } catch (error) {
-
     await client.query("ROLLBACK");
 
     console.error("❌ Error eliminando cliente:", error);
@@ -791,11 +773,8 @@ app.delete("/clientes/:id", async (req, res) => {
       table: error.table,
       constraint: error.constraint,
     });
-
   } finally {
-
     client.release();
-
   }
 });
 
@@ -925,7 +904,6 @@ app.put("/inventario/:id", async (req, res) => {
     });
   }
 });
-
 
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
