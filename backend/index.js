@@ -68,6 +68,16 @@ const storage = multer.diskStorage({
   },
 });
 
+app.get("/test-uploads", (req, res) => {
+  fs.readdir(uploadsDir, (err, files) => {
+    if (err) {
+      return res.status(500).json(err);
+    }
+
+    res.json(files);
+  });
+});
+
 const fileFilter = (req, file, cb) => {
   const permitidos = [
     "image/jpeg",
