@@ -78,11 +78,7 @@ app.get("/test-uploads", (req, res) => {
 });
 
 const fileFilter = (req, file, cb) => {
-  const permitidos = [
-    "image/jpeg",
-    "image/jpg",
-    "application/pdf",
-  ];
+  const permitidos = ["image/jpeg", "image/jpg", "application/pdf"];
 
   if (permitidos.includes(file.mimetype)) {
     cb(null, true);
@@ -782,6 +778,7 @@ app.post("/inventario", async (req, res) => {
       clave_producto,
       nombre_producto,
       marca,
+      tipo_producto,
       descripcion,
       cantidad_min,
       cantidad_max,
@@ -799,6 +796,7 @@ app.post("/inventario", async (req, res) => {
         nombre_producto,
         marca,
         descripcion,
+        tipo_producto,
         cantidad_min,
         cantidad_max,
         cantidad_total,
@@ -808,12 +806,13 @@ app.post("/inventario", async (req, res) => {
         puesto_id
       )
       VALUES
-      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       RETURNING *`,
       [
         clave_producto,
         nombre_producto,
         marca,
+        tipo_producto,
         descripcion,
         cantidad_min,
         cantidad_max,
@@ -870,6 +869,7 @@ app.put("/inventario/:id", async (req, res) => {
     const {
       clave_producto,
       nombre_producto,
+      tipo_producto,
       marca,
       descripcion,
       cantidad_min,
@@ -887,8 +887,9 @@ app.put("/inventario/:id", async (req, res) => {
         descripcion = $4,
         cantidad_min = $5,
         cantidad_max = $6,
-        cantidad_total = $7
-      WHERE id = $8
+        cantidad_total = $7,
+        tipo_producto = $8
+      WHERE id = $9
       RETURNING *
       `,
       [
@@ -899,8 +900,9 @@ app.put("/inventario/:id", async (req, res) => {
         cantidad_min,
         cantidad_max,
         cantidad_total,
+        tipo_producto,
         req.params.id,
-      ]
+      ],
     );
 
     res.json(result.rows[0]);
