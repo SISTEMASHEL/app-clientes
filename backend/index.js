@@ -781,6 +781,8 @@ app.post("/inventario", async (req, res) => {
     const {
       clave_producto,
       nombre_producto,
+      marca,
+      descripcion,
       cantidad_min,
       cantidad_max,
       cantidad_total,
@@ -795,6 +797,8 @@ app.post("/inventario", async (req, res) => {
       (
         clave_producto,
         nombre_producto,
+        marca,
+        descripcion,
         cantidad_min,
         cantidad_max,
         cantidad_total,
@@ -809,6 +813,8 @@ app.post("/inventario", async (req, res) => {
       [
         clave_producto,
         nombre_producto,
+        marca,
+        descripcion,
         cantidad_min,
         cantidad_max,
         cantidad_total,
@@ -864,6 +870,8 @@ app.put("/inventario/:id", async (req, res) => {
     const {
       clave_producto,
       nombre_producto,
+      marca,
+      descripcion,
       cantidad_min,
       cantidad_max,
       cantidad_total,
@@ -875,20 +883,24 @@ app.put("/inventario/:id", async (req, res) => {
       SET
         clave_producto = $1,
         nombre_producto = $2,
-        cantidad_min = $3,
-        cantidad_max = $4,
-        cantidad_total = $5
-      WHERE id = $6
+        marca = $3,
+        descripcion = $4,
+        cantidad_min = $5,
+        cantidad_max = $6,
+        cantidad_total = $7
+      WHERE id = $8
       RETURNING *
       `,
       [
         clave_producto,
         nombre_producto,
+        marca,
+        descripcion,
         cantidad_min,
         cantidad_max,
         cantidad_total,
         req.params.id,
-      ],
+      ]
     );
 
     res.json(result.rows[0]);
