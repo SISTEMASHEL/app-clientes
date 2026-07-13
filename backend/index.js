@@ -458,11 +458,8 @@ app.post("/documentos", upload.single("archivo"), async (req, res) => {
     console.log("Archivo recibido:");
     console.log(req.file);
 
-    const ruta = `/uploads/${req.file.filename}`;
-
-    console.log("Ruta BD:", ruta);
-
     const rutaFisica = path.join(uploadsDir, req.file.filename);
+    console.log("Ruta BD:", `/uploads/${req.file.filename}`);
 
     console.log("Ruta física:", rutaFisica);
 
