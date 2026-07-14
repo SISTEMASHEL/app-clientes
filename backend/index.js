@@ -42,7 +42,9 @@ const db = new Pool({
 
 // ------------------- 📁 FIX IMPORTANTE: UPLOADS UNIFICADO -------------------
 
-const uploadsDir = path.join(__dirname, "uploads");
+const uploadsDir = process.env.RENDER
+  ? "/uploads"
+  : path.join(__dirname, "uploads");
 
 // ✅ asegurar que exista en Render/local
 if (!fs.existsSync(uploadsDir)) {
