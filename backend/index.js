@@ -279,10 +279,24 @@ app.get("/riesgos", async (req, res) => {
 
 app.get("/epp", async (req, res) => {
   try {
-    const result = await db.query("SELECT * FROM equipo_proteccion");
-    res.send(result.rows);
+    const result = await db.query(`
+      SELECT
+        ep.id,
+        ep.nombre,
+        ep.categoria_id,
+        c.nombre AS categoria
+      FROM equipo_proteccion ep
+      INNER JOIN categorias_epp c
+        ON ep.categoria_id = c.id
+      ORDER BY c.nombre, ep.nombre
+    `);
+
+    res.json(result.rows);
   } catch (err) {
-    res.status(500).send(err);
+    console.error(err);
+    res.status(500).json({
+      error: err.message,
+    });
   }
 });
 
