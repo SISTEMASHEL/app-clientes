@@ -270,10 +270,24 @@ app.post("/areas/:id/puestos", async (req, res) => {
 // ------------------- CATÁLOGOS ------------------- //
 app.get("/riesgos", async (req, res) => {
   try {
-    const result = await db.query("SELECT * FROM riesgos_laborales");
-    res.send(result.rows);
+    const result = await db.query(`
+      SELECT
+        r.id,
+        r.nombre,
+        r.categoria_id,
+        c.nombre AS categoria
+      FROM riesgos_laborales r
+      INNER JOIN categorias_epp c
+        ON r.categoria_id = c.id
+      ORDER BY c.nombre, r.nombre
+    `);
+
+    res.json(result.rows);
   } catch (err) {
-    res.status(500).send(err);
+    console.error(err);
+    res.status(500).json({
+      error: err.message,
+    });
   }
 });
 
