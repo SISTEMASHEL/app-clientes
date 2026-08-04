@@ -802,43 +802,15 @@ app.delete("/clientes/:id", async (req, res) => {
 
 //Crear inventario
 
-app.post("/inventario", async (req, res) => {
-  try {
-    const {
-      clave_producto,
-      nombre_producto,
-      marca,
-      tipo_producto,
-      descripcion,
-      cantidad_min,
-      cantidad_max,
-      cantidad_total,
-      usuario_id,
-      cliente_id,
-      area_id,
-      puesto_id,
-    } = req.body;
-
-    const result = await db.query(
-      `INSERT INTO inventario
-      (
-        clave_producto,
-        nombre_producto,
-        marca,
-        descripcion,
-        tipo_producto,
-        cantidad_min,
-        cantidad_max,
-        cantidad_total,
-        usuario_id,
-        cliente_id,
-        area_id,
-        puesto_id
-      )
-      VALUES
-      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-      RETURNING *`,
-      [
+app.post(
+  "/inventario",
+  upload.fields([
+    { name: "ficha_tecnica", maxCount: 1 },
+    { name: "certificado", maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      const {
         clave_producto,
         nombre_producto,
         marca,
@@ -851,18 +823,77 @@ app.post("/inventario", async (req, res) => {
         cliente_id,
         area_id,
         puesto_id,
-      ],
-    );
+      } = req.body;
 
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.log(error);
+      // ===========================
+      // Obtener rutas de los PDF
+      // ===========================
 
-    res.status(500).json({
-      error: error.message,
-    });
-  }
-});
+      const fichaTecnica = req.files?.ficha_tecnica
+        ? `/uploads/${req.files.ficha_tecnica[0].filename}`
+        : null;
+
+      const certificado = req.files?.certificado
+        ? `/uploads/${req.files.certificado[0].filename}`
+        : null;
+
+      console.log("Ficha técnica:", fichaTecnica);
+      console.log("Certificado:", certificado);
+
+      const result = await db.query(
+        `
+        INSERT INTO inventario
+        (
+          clave_producto,
+          nombre_producto,
+          marca,
+          descripcion,
+          tipo_producto,
+          cantidad_min,
+          cantidad_max,
+          cantidad_total,
+          usuario_id,
+          cliente_id,
+          area_id,
+          puesto_id,
+          ficha_tecnica,
+          certificado
+        )
+        VALUES
+        (
+          $1,$2,$3,$4,$5,$6,$7,$8,
+          $9,$10,$11,$12,$13,$14
+        )
+        RETURNING *
+        `,
+        [
+          clave_producto,
+          nombre_producto,
+          marca,
+          descripcion,
+          tipo_producto,
+          cantidad_min,
+          cantidad_max,
+          cantidad_total,
+          usuario_id,
+          cliente_id,
+          area_id,
+          puesto_id,
+          fichaTecnica,
+          certificado,
+        ],
+      );
+
+      res.json(result.rows[0]);
+    } catch (error) {
+      console.log(error);
+
+      res.status(500).json({
+        error: error.message,
+      });
+    }
+  },
+);
 
 //Listar Inventario
 app.get("/inventario/:clienteId", async (req, res) => {
