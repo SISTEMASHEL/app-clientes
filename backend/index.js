@@ -976,6 +976,58 @@ app.put("/inventario/:id", async (req, res) => {
   }
 });
 
+app.post("/validar-password", async(req,res)=>{
+
+ try{
+
+ const {usuario_id,password}=req.body;
+
+
+ const usuario = await db.query(
+ `
+ SELECT password
+ FROM usuarios
+ WHERE id=$1
+ `,
+ [usuario_id]
+ );
+
+
+ if(usuario.rows.length===0){
+
+   return res.json({
+    valido:false
+   });
+
+ }
+
+
+ if(usuario.rows[0].password === password){
+
+   return res.json({
+    valido:true
+   });
+
+ }
+
+
+ res.json({
+   valido:false
+ });
+
+
+ }catch(error){
+
+ console.log(error);
+
+ res.status(500).json({
+  error:error.message
+ });
+
+ }
+
+});
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
