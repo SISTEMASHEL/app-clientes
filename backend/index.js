@@ -976,64 +976,47 @@ app.put("/inventario/:id", async (req, res) => {
   }
 });
 
-app.post("/validar-password", async(req,res)=>{
+app.post("/validar-password", async (req, res) => {
+  try {
+    const { usuario_id, password } = req.body;
 
- try{
-
- const {usuario_id,password}=req.body;
-
-
- const usuario = await db.query(
- `
+    const usuario = await db.query(
+      `
  SELECT password
  FROM usuarios
  WHERE id=$1
  `,
- [usuario_id]
- );
+      [usuario_id],
+    );
 
+    if (usuario.rows.length === 0) {
+      return res.json({
+        valido: false,
+      });
+    }
 
- if(usuario.rows.length===0){
+    if (usuario.rows[0].password === password) {
+      return res.json({
+        valido: true,
+      });
+    }
 
-   return res.json({
-    valido:false
-   });
+    res.json({
+      valido: false,
+    });
+  } catch (error) {
+    console.log(error);
 
- }
-
-
- if(usuario.rows[0].password === password){
-
-   return res.json({
-    valido:true
-   });
-
- }
-
-
- res.json({
-   valido:false
- });
-
-
- }catch(error){
-
- console.log(error);
-
- res.status(500).json({
-  error:error.message
- });
-
- }
-
+    res.status(500).json({
+      error: error.message,
+    });
+  }
 });
 
 app.get("/reportes/puestos/:clienteId", async (req, res) => {
-
   const { clienteId } = req.params;
 
   try {
-
     const resultado = await pool.query(
       `
       SELECT 
@@ -1067,8 +1050,8 @@ app.get("/reportes/puestos/:clienteId", async (req, res) => {
       LEFT JOIN puestos_riesgos pr
       ON p.id = pr.puesto_id
 
-      LEFT JOIN riesgos_laborales r
-      ON pr.riesgo_id = r.id
+      LEFT JOIN riesgos r
+ON pr.riesgo_id = r.id
 
 
       LEFT JOIN puestos_epp pe
@@ -1091,23 +1074,17 @@ app.get("/reportes/puestos/:clienteId", async (req, res) => {
         p.puesto
 
       `,
-      [clienteId]
+      [clienteId],
     );
 
-
     res.json(resultado.rows);
-
-
-  } catch(error){
-
+  } catch (error) {
     console.log(error);
 
     res.status(500).json({
-      error:"Error obteniendo reportes de puestos"
+      error: "Error obteniendo reportes de puestos",
     });
-
   }
-
 });
 
 // ------------------- INICIAR SERVIDOR -------------------
