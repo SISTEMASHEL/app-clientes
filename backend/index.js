@@ -1112,6 +1112,48 @@ app.get("/reportes/puestos/:clienteId", async (req, res) => {
 
 });
 
+app.get("/reportes/areas/:clienteId", async (req, res) => {
+
+  const { clienteId } = req.params;
+
+  try {
+
+    const resultado = await db.query(
+      `
+      SELECT
+        a.id,
+        a.nombre_area,
+        a.descripcion,
+        a.image,
+        a.encargado,
+        a.contacto
+
+      FROM areas_trabajo a
+
+      WHERE a.cliente_id = $1
+
+      ORDER BY a.nombre_area
+
+      `,
+      [clienteId]
+    );
+
+
+    res.json(resultado.rows);
+
+
+  } catch(error){
+
+    console.log(error);
+
+    res.status(500).json({
+      error:"Error obteniendo áreas del cliente"
+    });
+
+  }
+
+});
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
