@@ -1100,8 +1100,11 @@ app.get("/reportes/puestos/:clienteId", async (req, res) => {
 
   } catch(error){
 
-  console.log("ERROR REPORTES PUESTOS:");
+  console.log("================================");
+  console.log("ERROR REPORTE PUESTOS:");
   console.log(error.message);
+  console.log(error);
+  console.log("================================");
 
   res.status(500).json({
     error: error.message
