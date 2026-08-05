@@ -1034,7 +1034,7 @@ app.get("/reportes/puestos/:clienteId", async (req, res) => {
 
   try {
 
-    const resultado = await pool.query(
+    const resultado = await db.query(
       `
       SELECT 
         p.id,
