@@ -1028,6 +1028,88 @@ app.post("/validar-password", async(req,res)=>{
 
 });
 
+app.get("/reportes/puestos/:clienteId", async (req, res) => {
+
+  const { clienteId } = req.params;
+
+  try {
+
+    const resultado = await pool.query(
+      `
+      SELECT 
+        p.id,
+        p.puesto,
+        p.numero_usuarios,
+        p.descripcion,
+        p.criterio_epp,
+
+        a.nombre_area,
+
+        COALESCE(
+          json_agg(DISTINCT r.nombre)
+          FILTER (WHERE r.nombre IS NOT NULL),
+          '[]'
+        ) AS riesgos,
+
+        COALESCE(
+          json_agg(DISTINCT e.nombre)
+          FILTER (WHERE e.nombre IS NOT NULL),
+          '[]'
+        ) AS epp
+
+
+      FROM puestos_trabajo p
+
+      INNER JOIN areas_trabajo a
+      ON p.area_id = a.id
+
+
+      LEFT JOIN puestos_riesgos pr
+      ON p.id = pr.puesto_id
+
+      LEFT JOIN riesgos_laborales r
+      ON pr.riesgo_id = r.id
+
+
+      LEFT JOIN puestos_epp pe
+      ON p.id = pe.puesto_id
+
+      LEFT JOIN equipo_proteccion e
+      ON pe.epp_id = e.id
+
+
+      WHERE a.cliente_id = $1
+
+
+      GROUP BY 
+        p.id,
+        a.nombre_area
+
+
+      ORDER BY 
+        a.nombre_area,
+        p.puesto
+
+      `,
+      [clienteId]
+    );
+
+
+    res.json(resultado.rows);
+
+
+  } catch(error){
+
+    console.log(error);
+
+    res.status(500).json({
+      error:"Error obteniendo reportes de puestos"
+    });
+
+  }
+
+});
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
