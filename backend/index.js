@@ -1067,12 +1067,14 @@ app.get("/reportes/puestos/:clienteId", async (req, res) => {
       LEFT JOIN puestos_riesgos pr
       ON p.id = pr.puesto_id
 
+
       LEFT JOIN riesgos_laborales r
       ON pr.riesgo_id = r.id
 
 
       LEFT JOIN puestos_epp pe
       ON p.id = pe.puesto_id
+
 
       LEFT JOIN equipo_proteccion e
       ON pe.epp_id = e.id
@@ -1100,17 +1102,13 @@ app.get("/reportes/puestos/:clienteId", async (req, res) => {
 
   } catch(error){
 
-  console.log("================================");
-  console.log("ERROR REPORTE PUESTOS:");
-  console.log(error.message);
-  console.log(error);
-  console.log("================================");
+    console.log("ERROR REPORTES PUESTOS:", error.message);
 
-  res.status(500).json({
-    error: error.message
-  });
+    res.status(500).json({
+      error:error.message
+    });
 
-}
+  }
 
 });
 
