@@ -51,6 +51,13 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+// Carpeta exclusiva para los reportes NOM
+const reportesNomDir = path.join(uploadsDir, "reportes_nom");
+
+if (!fs.existsSync(reportesNomDir)) {
+  fs.mkdirSync(reportesNomDir, { recursive: true });
+}
+
 app.use("/uploads", express.static(uploadsDir));
 
 // Test directo
@@ -68,6 +75,133 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + ext);
   },
 });
+
+const storageReportesNom = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, reportesNomDir);
+  },
+
+  filename: (req, file, cb) => {
+    const nombreOriginal = path.basename(file.originalname);
+
+    const nombreArchivo = `${Date.now()}-${nombreOriginal}`;
+
+    cb(null, nombreArchivo);
+  },
+});
+
+const uploadReporteNom = multer({
+  storage: storageReportesNom,
+
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === "application/pdf") {
+      cb(null, true);
+    } else {
+      cb(new Error("Solo se permiten archivos PDF"));
+    }
+  },
+});
+
+// =====================================================
+// SUBIR DOCUMENTOS DE REPORTES NOM - OPCIÓN 1
+// =====================================================
+
+app.post(
+  "/reportes-nom/opcion-1",
+  uploadReporteNom.single("archivo"),
+  async (req, res) => {
+    try {
+      console.log("===== SUBIDA REPORTE NOM OPCIÓN 1 =====");
+
+      console.log("BODY:", req.body);
+      console.log("FILE:", req.file);
+
+      const {
+        cliente_id,
+        tipo_documento,
+      } = req.body;
+
+      // -----------------------------------------
+      // VALIDAR ARCHIVO
+      // -----------------------------------------
+
+      if (!req.file) {
+        return res.status(400).json({
+          error: "No se recibió ningún archivo PDF",
+        });
+      }
+
+      // -----------------------------------------
+      // VALIDAR DATOS
+      // -----------------------------------------
+
+      if (!cliente_id) {
+        return res.status(400).json({
+          error: "cliente_id es requerido",
+        });
+      }
+
+      if (!tipo_documento) {
+        return res.status(400).json({
+          error: "tipo_documento es requerido",
+        });
+      }
+
+      // -----------------------------------------
+      // RUTA DEL ARCHIVO
+      // -----------------------------------------
+
+      const ruta = `/uploads/reportes_nom/${req.file.filename}`;
+
+      console.log("Archivo guardado:", req.file.filename);
+      console.log("Ruta BD:", ruta);
+
+      // -----------------------------------------
+      // GUARDAR EN BASE DE DATOS
+      // -----------------------------------------
+
+      const result = await db.query(
+        `
+        INSERT INTO reportes_nom
+        (
+          cliente_id,
+          tipo_documento,
+          archivo
+        )
+        VALUES
+        ($1, $2, $3)
+        RETURNING *
+        `,
+        [
+          cliente_id,
+          tipo_documento,
+          ruta,
+        ]
+      );
+
+      console.log("Registro guardado en BD:", result.rows[0]);
+
+      res.json({
+        success: true,
+        mensaje: "PDF subido correctamente",
+        reporte: result.rows[0],
+      });
+
+    } catch (error) {
+
+      console.error(
+        "❌ ERROR SUBIENDO REPORTE NOM:",
+        error
+      );
+
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+
+    }
+  }
+);
 
 app.get("/test-uploads", (req, res) => {
   fs.readdir(uploadsDir, (err, files) => {
