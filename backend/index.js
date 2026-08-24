@@ -103,83 +103,120 @@ const uploadReporteNom = multer({
 });
 
 // =====================================================
-// SUBIR DOCUMENTOS DE REPORTES NOM - OPCIÓN 1
+// SUBIR DOCUMENTOS DE REPORTES NOM
+// OPCIONES 1 A 12
 // =====================================================
 
 app.post(
-  "/reportes-nom/opcion-1",
+  "/reportes-nom",
   uploadReporteNom.single("archivo"),
   async (req, res) => {
     try {
-      console.log("===== SUBIDA REPORTE NOM OPCIÓN 1 =====");
+      console.log("=================================");
+      console.log("===== SUBIDA REPORTE NOM =====");
+      console.log("=================================");
 
       console.log("BODY:", req.body);
       console.log("FILE:", req.file);
 
       const {
         cliente_id,
+        opcion_nom,
         tipo_documento,
       } = req.body;
 
-      // -----------------------------------------
+      // =========================================
       // VALIDAR ARCHIVO
-      // -----------------------------------------
+      // =========================================
 
       if (!req.file) {
         return res.status(400).json({
+          success: false,
           error: "No se recibió ningún archivo PDF",
         });
       }
 
-      // -----------------------------------------
-      // VALIDAR DATOS
-      // -----------------------------------------
+      // =========================================
+      // VALIDAR CLIENTE
+      // =========================================
 
       if (!cliente_id) {
         return res.status(400).json({
+          success: false,
           error: "cliente_id es requerido",
         });
       }
 
+      // =========================================
+      // VALIDAR OPCIÓN NOM
+      // =========================================
+
+      if (!opcion_nom) {
+        return res.status(400).json({
+          success: false,
+          error: "opcion_nom es requerido",
+        });
+      }
+
+      // =========================================
+      // VALIDAR TIPO DOCUMENTO
+      // =========================================
+
       if (!tipo_documento) {
         return res.status(400).json({
+          success: false,
           error: "tipo_documento es requerido",
         });
       }
 
-      // -----------------------------------------
+      // =========================================
       // RUTA DEL ARCHIVO
-      // -----------------------------------------
+      // =========================================
 
       const ruta = `/uploads/reportes_nom/${req.file.filename}`;
 
-      console.log("Archivo guardado:", req.file.filename);
+      console.log("Archivo físico:", req.file.filename);
+      console.log("Nombre original:", req.file.originalname);
       console.log("Ruta BD:", ruta);
+      console.log("Cliente:", cliente_id);
+      console.log("Opción NOM:", opcion_nom);
+      console.log("Tipo documento:", tipo_documento);
 
-      // -----------------------------------------
-      // GUARDAR EN BASE DE DATOS
-      // -----------------------------------------
+      // =========================================
+      // GUARDAR EN POSTGRESQL
+      // =========================================
 
       const result = await db.query(
         `
         INSERT INTO reportes_nom
         (
           cliente_id,
+          opcion_nom,
           tipo_documento,
+          nombre_archivo,
           archivo
         )
         VALUES
-        ($1, $2, $3)
+        ($1, $2, $3, $4, $5)
         RETURNING *
         `,
         [
           cliente_id,
+          opcion_nom,
           tipo_documento,
+          req.file.originalname,
           ruta,
         ]
       );
 
-      console.log("Registro guardado en BD:", result.rows[0]);
+      console.log(
+        "Registro guardado en BD:",
+        result.rows[0]
+      );
+
+      // =========================================
+      // RESPUESTA
+      // =========================================
 
       res.json({
         success: true,
@@ -198,7 +235,6 @@ app.post(
         success: false,
         error: error.message,
       });
-
     }
   }
 );
