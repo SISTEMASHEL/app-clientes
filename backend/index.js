@@ -1324,6 +1324,41 @@ app.get("/reportes/areas/:clienteId", async (req, res) => {
 
 });
 
+// =====================================================
+// OBTENER REPORTES NOM DE UN CLIENTE
+// =====================================================
+
+app.get("/reportes-nom/:clienteId", async (req, res) => {
+  const { clienteId } = req.params;
+
+  try {
+    const resultado = await db.query(
+      `
+      SELECT
+        id,
+        cliente_id,
+        opcion_nom,
+        tipo_documento,
+        nombre_archivo,
+        archivo,
+        created_at
+      FROM reportes_nom
+      WHERE cliente_id = $1
+      ORDER BY opcion_nom ASC, id ASC
+      `,
+      [clienteId]
+    );
+
+    res.json(resultado.rows);
+  } catch (error) {
+    console.error("ERROR OBTENIENDO REPORTES NOM:", error);
+
+    res.status(500).json({
+      error: "No se pudieron obtener los reportes NOM",
+    });
+  }
+});
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
