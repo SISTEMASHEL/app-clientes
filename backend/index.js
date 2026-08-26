@@ -788,79 +788,179 @@ app.get("/puestos/:id/cuestionarios", async (req, res) => {
 });
 
 // ===============================
-// ===============================
 // REPORTE CONSOLIDADO NOM
 // Cliente + Área + Puesto
+// + ARP
+// + Ficha Técnica NOM
+// + Ficha Técnica EPP
+// + Certificado EPP
 // ===============================
 app.get("/reporte-consolidado", async (req, res) => {
   try {
     const puestoId = parseInt(req.query.puestoId, 10);
 
     if (!puestoId) {
-      return res.status(400).json({ message: "puestoId requerido" });
+      return res.status(400).json({
+        message: "puestoId requerido",
+      });
     }
 
     const sql = `
       SELECT
-    c.id AS cliente_id,
-    c.nombre_empresa AS cliente_nombre,
-    a.id AS area_id,
-    a.nombre_area AS area_nombre,
-    p.id AS puesto_id,
-    p.puesto AS puesto_nombre,
 
-    ci.id AS info_id,
-    ci.nom,
-    ci.created_at,
-    ci.image,
+        /* =====================================
+           CLIENTE
+        ===================================== */
 
-    arp.archivo AS arp,
-    ficha.archivo AS ficha,
+        c.id AS cliente_id,
+        c.nombre_empresa AS cliente_nombre,
 
-    ci.observaciones AS naturaleza_emision,
-    ci.recomendaciones AS descripcion_operacion,
-    ci.recomendaciones_epp AS epp_recomendado,
 
-    ns.subopcion,
+        /* =====================================
+           ÁREA
+        ===================================== */
 
-    q.pregunta,
-    q.respuesta
+        a.id AS area_id,
+        a.nombre_area AS area_nombre,
 
-FROM puestos_trabajo p
 
-JOIN areas_trabajo a
-ON a.id=p.area_id
+        /* =====================================
+           PUESTO
+        ===================================== */
 
-JOIN clientes c
-ON c.id=a.cliente_id
+        p.id AS puesto_id,
+        p.puesto AS puesto_nombre,
 
-JOIN cuestionarios_info ci
-ON ci.puesto_id=p.id
 
-JOIN cuestionarios q
-ON q.info_id=ci.id
+        /* =====================================
+           CUESTIONARIO
+        ===================================== */
 
-LEFT JOIN nom_subopciones ns
-ON ns.id=ci.subopcion_id
+        ci.id AS info_id,
+        ci.nom,
+        ci.created_at,
+        ci.image,
 
-LEFT JOIN documentos_cuestionario arp
-ON arp.cuestionario_info_id=ci.id
-AND arp.tipo='ARP'
 
-LEFT JOIN documentos_cuestionario ficha
-ON ficha.cuestionario_info_id=ci.id
-AND ficha.tipo='FICHA'
+        /* =====================================
+           DOCUMENTOS DEL CUESTIONARIO
+           ESTOS YA EXISTÍAN
+        ===================================== */
 
-WHERE p.id=$1
+        arp.archivo AS arp,
 
-ORDER BY ci.created_at;
+        ficha.archivo AS ficha,
+
+
+        /* =====================================
+           DOCUMENTOS DEL EPP / INVENTARIO
+        ===================================== */
+
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'id', inv.id,
+                'nombre_producto', inv.nombre_producto,
+                'clave_producto', inv.clave_producto,
+                'marca', inv.marca,
+                'ficha_tecnica', inv.ficha_tecnica,
+                'certificado', inv.certificado
+              )
+              ORDER BY inv.id
+            )
+            FROM inventario inv
+            WHERE inv.puesto_id = p.id
+          ),
+          '[]'::json
+        ) AS documentos_epp,
+
+
+        /* =====================================
+           INFORMACIÓN DEL CUESTIONARIO
+        ===================================== */
+
+        ci.observaciones AS naturaleza_emision,
+
+        ci.recomendaciones AS descripcion_operacion,
+
+        ci.recomendaciones_epp AS epp_recomendado,
+
+
+        /* =====================================
+           SUBOPCIÓN
+        ===================================== */
+
+        ns.subopcion,
+
+
+        /* =====================================
+           PREGUNTA / RESPUESTA
+        ===================================== */
+
+        q.pregunta,
+        q.respuesta
+
+
+      FROM puestos_trabajo p
+
+
+      JOIN areas_trabajo a
+      ON a.id = p.area_id
+
+
+      JOIN clientes c
+      ON c.id = a.cliente_id
+
+
+      JOIN cuestionarios_info ci
+      ON ci.puesto_id = p.id
+
+
+      JOIN cuestionarios q
+      ON q.info_id = ci.id
+
+
+      LEFT JOIN nom_subopciones ns
+      ON ns.id = ci.subopcion_id
+
+
+      /* =====================================
+         ARP EXISTENTE
+      ===================================== */
+
+      LEFT JOIN documentos_cuestionario arp
+      ON arp.cuestionario_info_id = ci.id
+      AND arp.tipo = 'ARP'
+
+
+      /* =====================================
+         FICHA TÉCNICA NOM EXISTENTE
+         NO SE MODIFICA
+      ===================================== */
+
+      LEFT JOIN documentos_cuestionario ficha
+      ON ficha.cuestionario_info_id = ci.id
+      AND ficha.tipo = 'FICHA'
+
+
+      WHERE p.id = $1
+
+
+      ORDER BY ci.created_at;
     `;
 
     const { rows } = await db.query(sql, [puestoId]);
 
     res.json(rows);
+
   } catch (error) {
-    console.error("❌ Error reporte consolidado:", error.message);
+
+    console.error(
+      "❌ Error reporte consolidado:",
+      error.message
+    );
+
     res.status(500).json({
       message: "Error interno en reporte consolidado",
       error: error.message,
