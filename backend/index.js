@@ -1080,6 +1080,14 @@ app.post(
   ]),
   async (req, res) => {
     try {
+      console.log("=================================");
+console.log("📦 BODY INVENTARIO:");
+console.log(req.body);
+
+console.log("📄 FILES INVENTARIO:");
+console.log(req.files);
+
+console.log("=================================");
       const {
         clave_producto,
         nombre_producto,
