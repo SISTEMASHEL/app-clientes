@@ -704,55 +704,251 @@ app.post("/cuestionario", upload.single("image"), async (req, res) => {
 
 // SUBIR DOCUMENTOS (ARP / FICHA)
 
-app.post("/documentos", upload.single("archivo"), async (req, res) => {
-  console.log("BODY:");
-  console.log(req.body);
+// =====================================================
+// SUBIR DOCUMENTOS ARP / FICHA
+//
+// SOPORTA:
+// 1. documentos antiguos ligados al cuestionario
+// 2. documentos nuevos ligados directamente al puesto
+// =====================================================
 
-  console.log("FILE:");
-  console.log(req.file);
+app.post("/documentos", upload.single("archivo"), async (req, res) => {
+  console.log("====================================");
+  console.log("SUBIENDO DOCUMENTO");
+  console.log("BODY:", req.body);
+  console.log("FILE:", req.file);
+  console.log("====================================");
 
   try {
-    const { cuestionario_info_id, tipo } = req.body;
+    const {
+      cuestionario_info_id,
+      puesto_id,
+      tipo,
+    } = req.body;
 
     if (!req.file) {
       return res.status(400).json({
+        success: false,
         error: "No se recibió archivo",
       });
     }
-    console.log("Archivo recibido:");
-    console.log(req.file);
 
-    const rutaFisica = path.join(uploadsDir, req.file.filename);
-    console.log("Ruta BD:", `/uploads/${req.file.filename}`);
+    if (!tipo) {
+      return res.status(400).json({
+        success: false,
+        error: "El tipo de documento es requerido",
+      });
+    }
 
-    console.log("Ruta física:", rutaFisica);
+    if (!["ARP", "FICHA"].includes(tipo)) {
+      return res.status(400).json({
+        success: false,
+        error: "El tipo debe ser ARP o FICHA",
+      });
+    }
 
-    console.log("¿Existe?", fs.existsSync(rutaFisica));
+    // Debe venir por lo menos uno de los dos
+    if (!cuestionario_info_id && !puesto_id) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Se requiere cuestionario_info_id o puesto_id",
+      });
+    }
 
-    const ruta = `/uploads/${req.file.filename}`;
+    const ruta =
+      `/uploads/${req.file.filename}`;
+
+    console.log("Ruta BD:", ruta);
+
+    // =================================================
+    // NUEVA FORMA:
+    // DOCUMENTO DIRECTAMENTE DEL PUESTO
+    // =================================================
+
+    if (puesto_id) {
+      const puestoExiste = await db.query(
+        `
+        SELECT id
+        FROM puestos_trabajo
+        WHERE id = $1
+        `,
+        [puesto_id],
+      );
+
+      if (puestoExiste.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: "El puesto indicado no existe",
+        });
+      }
+
+      // -------------------------------------------------
+      // Buscar si ya existe documento de ese tipo
+      // para el mismo puesto
+      // -------------------------------------------------
+
+      const existente = await db.query(
+        `
+        SELECT id
+        FROM documentos_cuestionario
+        WHERE puesto_id = $1
+          AND tipo = $2
+        ORDER BY created_at DESC
+        LIMIT 1
+        `,
+        [puesto_id, tipo],
+      );
+
+      let result;
+
+      // -------------------------------------------------
+      // SI EXISTE → ACTUALIZAR
+      // -------------------------------------------------
+
+      if (existente.rows.length > 0) {
+        result = await db.query(
+          `
+          UPDATE documentos_cuestionario
+
+          SET
+            archivo = $1,
+            created_at = CURRENT_TIMESTAMP
+
+          WHERE id = $2
+
+          RETURNING *
+          `,
+          [
+            ruta,
+            existente.rows[0].id,
+          ],
+        );
+      }
+
+      // -------------------------------------------------
+      // SI NO EXISTE → INSERTAR
+      // -------------------------------------------------
+
+      else {
+        result = await db.query(
+          `
+          INSERT INTO documentos_cuestionario
+          (
+            cuestionario_info_id,
+            puesto_id,
+            tipo,
+            archivo
+          )
+          VALUES
+          (
+            NULL,
+            $1,
+            $2,
+            $3
+          )
+          RETURNING *
+          `,
+          [
+            puesto_id,
+            tipo,
+            ruta,
+          ],
+        );
+      }
+
+      return res.json({
+        success: true,
+        message:
+          tipo === "ARP"
+            ? "ARP guardado correctamente"
+            : "Ficha de Proceso guardada correctamente",
+        documento: result.rows[0],
+      });
+    }
+
+    // =================================================
+    // FORMA ANTIGUA:
+    // DOCUMENTO LIGADO AL CUESTIONARIO
+    // =================================================
 
     const result = await db.query(
-      `INSERT INTO documentos_cuestionario
-        (
-          cuestionario_info_id,
-          tipo,
-          archivo
-        )
-        VALUES ($1,$2,$3)
-        RETURNING *`,
-
-      [cuestionario_info_id, tipo, ruta],
+      `
+      INSERT INTO documentos_cuestionario
+      (
+        cuestionario_info_id,
+        puesto_id,
+        tipo,
+        archivo
+      )
+      VALUES
+      (
+        $1,
+        NULL,
+        $2,
+        $3
+      )
+      RETURNING *
+      `,
+      [
+        cuestionario_info_id,
+        tipo,
+        ruta,
+      ],
     );
 
-    res.json(result.rows[0]);
+    res.json({
+      success: true,
+      documento: result.rows[0],
+    });
   } catch (error) {
-    console.log(error);
+    console.error(
+      "ERROR SUBIENDO DOCUMENTO:",
+      error,
+    );
 
     res.status(500).json({
+      success: false,
       error: error.message,
     });
   }
 });
+
+app.get(
+  "/documentos-puesto/:puestoId",
+  async (req, res) => {
+    try {
+      const result = await db.query(
+        `
+        SELECT
+          id,
+          cuestionario_info_id,
+          puesto_id,
+          tipo,
+          archivo,
+          created_at
+
+        FROM documentos_cuestionario
+
+        WHERE puesto_id = $1
+          AND tipo IN ('ARP', 'FICHA')
+
+        ORDER BY created_at DESC
+        `,
+        [req.params.puestoId],
+      );
+
+      res.json(result.rows);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          "No fue posible obtener los documentos del puesto.",
+      });
+    }
+  },
+);
 
 // PREGUNTAS POR SUBOPCIÓN
 app.get("/preguntas/:subopcion_tipo", async (req, res) => {
@@ -864,6 +1060,19 @@ app.get("/puestos/:id/cuestionarios", async (req, res) => {
 // + Ficha Técnica EPP
 // + Certificado EPP
 // ===============================
+// ===============================
+// REPORTE CONSOLIDADO NOM
+// Cliente + Área + Puesto
+// + ARP
+// + Ficha Técnica NOM
+// + Ficha Técnica EPP
+// + Certificado EPP
+//
+// COMPATIBLE CON:
+// - documentos antiguos ligados a cuestionario_info_id
+// - documentos nuevos ligados directamente a puesto_id
+// ===============================
+
 app.get("/reporte-consolidado", async (req, res) => {
   try {
     const puestoId = parseInt(req.query.puestoId, 10);
@@ -912,13 +1121,77 @@ app.get("/reporte-consolidado", async (req, res) => {
 
 
         /* =====================================
-           DOCUMENTOS DEL CUESTIONARIO
-           ESTOS YA EXISTÍAN
+           ARP
+           
+           PRIORIDAD:
+           1. Documento nuevo ligado al puesto
+           2. Documento antiguo ligado al cuestionario
         ===================================== */
 
-        arp.archivo AS arp,
+        COALESCE(
+          (
+            SELECT dc_nuevo.archivo
 
-        ficha.archivo AS ficha,
+            FROM documentos_cuestionario dc_nuevo
+
+            WHERE dc_nuevo.puesto_id = p.id
+              AND dc_nuevo.tipo = 'ARP'
+
+            ORDER BY dc_nuevo.created_at DESC
+
+            LIMIT 1
+          ),
+
+          (
+            SELECT dc_antiguo.archivo
+
+            FROM documentos_cuestionario dc_antiguo
+
+            WHERE dc_antiguo.cuestionario_info_id = ci.id
+              AND dc_antiguo.tipo = 'ARP'
+
+            ORDER BY dc_antiguo.created_at DESC
+
+            LIMIT 1
+          )
+        ) AS arp,
+
+
+        /* =====================================
+           FICHA DE PROCESO
+           
+           PRIORIDAD:
+           1. Documento nuevo ligado al puesto
+           2. Documento antiguo ligado al cuestionario
+        ===================================== */
+
+        COALESCE(
+          (
+            SELECT dc_nuevo.archivo
+
+            FROM documentos_cuestionario dc_nuevo
+
+            WHERE dc_nuevo.puesto_id = p.id
+              AND dc_nuevo.tipo = 'FICHA'
+
+            ORDER BY dc_nuevo.created_at DESC
+
+            LIMIT 1
+          ),
+
+          (
+            SELECT dc_antiguo.archivo
+
+            FROM documentos_cuestionario dc_antiguo
+
+            WHERE dc_antiguo.cuestionario_info_id = ci.id
+              AND dc_antiguo.tipo = 'FICHA'
+
+            ORDER BY dc_antiguo.created_at DESC
+
+            LIMIT 1
+          )
+        ) AS ficha,
 
 
         /* =====================================
@@ -938,9 +1211,12 @@ app.get("/reporte-consolidado", async (req, res) => {
               )
               ORDER BY inv.id
             )
+
             FROM inventario inv
+
             WHERE inv.puesto_id = p.id
           ),
+
           '[]'::json
         ) AS documentos_epp,
 
@@ -974,52 +1250,88 @@ app.get("/reporte-consolidado", async (req, res) => {
       FROM puestos_trabajo p
 
 
-      JOIN areas_trabajo a
-      ON a.id = p.area_id
+      /* =====================================
+         ÁREA
+      ===================================== */
+
+      INNER JOIN areas_trabajo a
+        ON a.id = p.area_id
 
 
-      JOIN clientes c
-      ON c.id = a.cliente_id
+      /* =====================================
+         CLIENTE
+      ===================================== */
+
+      INNER JOIN clientes c
+        ON c.id = a.cliente_id
 
 
-      JOIN cuestionarios_info ci
-      ON ci.puesto_id = p.id
+      /* =====================================
+         CUESTIONARIOS
+      ===================================== */
+
+      INNER JOIN cuestionarios_info ci
+        ON ci.puesto_id = p.id
 
 
-      JOIN cuestionarios q
-      ON q.info_id = ci.id
+      /* =====================================
+         RESPUESTAS
+      ===================================== */
 
+      INNER JOIN cuestionarios q
+        ON q.info_id = ci.id
+
+
+      /* =====================================
+         SUBOPCIÓN
+      ===================================== */
 
       LEFT JOIN nom_subopciones ns
-      ON ns.id = ci.subopcion_id
+        ON ns.id = ci.subopcion_id
 
 
       /* =====================================
-         ARP EXISTENTE
+         FILTRO DEL PUESTO
       ===================================== */
-
-      LEFT JOIN documentos_cuestionario arp
-      ON arp.cuestionario_info_id = ci.id
-      AND arp.tipo = 'ARP'
-
-
-      /* =====================================
-         FICHA TÉCNICA NOM EXISTENTE
-         NO SE MODIFICA
-      ===================================== */
-
-      LEFT JOIN documentos_cuestionario ficha
-      ON ficha.cuestionario_info_id = ci.id
-      AND ficha.tipo = 'FICHA'
-
 
       WHERE p.id = $1
 
 
-      ORDER BY ci.created_at;
+      /* =====================================
+         ORDEN
+      ===================================== */
+
+      ORDER BY
+        ci.created_at,
+        q.id;
     `;
 
-    const { rows } = await db.query(sql, [puestoId]);
+    const { rows } = await db.query(
+      sql,
+      [puestoId],
+    );
+
+    console.log(
+      "====================================",
+    );
+
+    console.log(
+      "REPORTE CONSOLIDADO",
+    );
+
+    console.log(
+      "PUESTO:",
+      puestoId,
+    );
+
+    console.log(
+      "REGISTROS:",
+      rows.length,
+    );
+
+    console.log(
+      "====================================",
+    );
 
     res.json(rows);
 
@@ -1027,114 +1339,461 @@ app.get("/reporte-consolidado", async (req, res) => {
 
     console.error(
       "❌ Error reporte consolidado:",
-      error.message
+      error,
     );
 
     res.status(500).json({
-      message: "Error interno en reporte consolidado",
-      error: error.message,
+      message:
+        "Error interno en reporte consolidado",
+
+      error:
+        error.message,
     });
   }
 });
 
-// ------------------- ELIMINAR CLIENTE COMPLETO -------------------
-// ------------------- ELIMINAR CLIENTE COMPLETO -------------------
+// ======================================================
+// ELIMINAR CLIENTE COMPLETO
+//
+// ELIMINA:
+// - inventario
+// - reportes NOM
+// - documentos ARP / FICHA nuevos
+// - documentos ARP / FICHA antiguos
+// - cuestionarios
+// - cuestionarios_info
+// - puestos_riesgos
+// - puestos_epp
+// - puestos_normas
+// - puestos
+// - áreas
+// - cliente
+// ======================================================
+
 app.delete("/clientes/:id", async (req, res) => {
-  const clienteId = req.params.id;
-  const client = await db.connect();
 
-  try {
-    await client.query("BEGIN");
-
-    // ✅ Eliminar inventario relacionado con el cliente
-    await client.query("DELETE FROM inventario WHERE cliente_id = $1", [
-      clienteId,
-    ]);
-
-    // 1️⃣ Obtener áreas del cliente
-    const areas = await client.query(
-      "SELECT id FROM areas_trabajo WHERE cliente_id = $1",
-      [clienteId],
+  const clienteId =
+    parseInt(
+      req.params.id,
+      10,
     );
 
-    for (const area of areas.rows) {
-      // 2️⃣ Obtener puestos del área
-      const puestos = await client.query(
-        "SELECT id FROM puestos_trabajo WHERE area_id = $1",
-        [area.id],
+
+  if (!clienteId) {
+
+    return res.status(400).json({
+      success: false,
+      message:
+        "ID de cliente inválido",
+    });
+  }
+
+
+  const client =
+    await db.connect();
+
+
+  try {
+
+    console.log(
+      "====================================",
+    );
+
+    console.log(
+      "ELIMINANDO CLIENTE COMPLETO",
+    );
+
+    console.log(
+      "CLIENTE ID:",
+      clienteId,
+    );
+
+    console.log(
+      "====================================",
+    );
+
+
+    await client.query(
+      "BEGIN",
+    );
+
+
+    // ==================================================
+    // 1. VERIFICAR QUE EL CLIENTE EXISTA
+    // ==================================================
+
+    const clienteExiste =
+      await client.query(
+        `
+        SELECT id
+        FROM clientes
+        WHERE id = $1
+        `,
+        [
+          clienteId,
+        ],
       );
 
-      for (const puesto of puestos.rows) {
-        // 3️⃣ Eliminar relaciones del puesto
-        await client.query("DELETE FROM puestos_riesgos WHERE puesto_id = $1", [
-          puesto.id,
-        ]);
 
-        await client.query("DELETE FROM puestos_epp WHERE puesto_id = $1", [
-          puesto.id,
-        ]);
+    if (
+      clienteExiste.rows.length === 0
+    ) {
 
-        await client.query("DELETE FROM puestos_normas WHERE puesto_id = $1", [
-          puesto.id,
-        ]);
+      await client.query(
+        "ROLLBACK",
+      );
 
-        // 4️⃣ Obtener cuestionarios_info
-        const infos = await client.query(
-          "SELECT id FROM cuestionarios_info WHERE puesto_id = $1",
-          [puesto.id],
+
+      return res.status(404).json({
+        success: false,
+        message:
+          "El cliente no existe",
+      });
+    }
+
+
+    // ==================================================
+    // 2. ELIMINAR INVENTARIO
+    // ==================================================
+
+    await client.query(
+      `
+      DELETE FROM inventario
+      WHERE cliente_id = $1
+      `,
+      [
+        clienteId,
+      ],
+    );
+
+
+    // ==================================================
+    // 3. ELIMINAR REPORTES NOM DEL CLIENTE
+    // ==================================================
+
+    await client.query(
+      `
+      DELETE FROM reportes_nom
+      WHERE cliente_id = $1
+      `,
+      [
+        clienteId,
+      ],
+    );
+
+
+    // ==================================================
+    // 4. OBTENER ÁREAS DEL CLIENTE
+    // ==================================================
+
+    const areas =
+      await client.query(
+        `
+        SELECT id
+        FROM areas_trabajo
+        WHERE cliente_id = $1
+        `,
+        [
+          clienteId,
+        ],
+      );
+
+
+    // ==================================================
+    // RECORRER ÁREAS
+    // ==================================================
+
+    for (
+      const area
+      of areas.rows
+    ) {
+
+      // ================================================
+      // 5. OBTENER PUESTOS
+      // ================================================
+
+      const puestos =
+        await client.query(
+          `
+          SELECT id
+          FROM puestos_trabajo
+          WHERE area_id = $1
+          `,
+          [
+            area.id,
+          ],
         );
 
-        for (const info of infos.rows) {
-          // 5️⃣ Eliminar respuestas
-          await client.query("DELETE FROM cuestionarios WHERE info_id = $1", [
-            info.id,
-          ]);
 
-          // ✅ Eliminar documentos del cuestionario
+      // ================================================
+      // RECORRER PUESTOS
+      // ================================================
+
+      for (
+        const puesto
+        of puestos.rows
+      ) {
+
+
+        // ==============================================
+        // 6. DOCUMENTOS NUEVOS
+        // LIGADOS DIRECTAMENTE AL PUESTO
+        // ==============================================
+
+        await client.query(
+          `
+          DELETE FROM documentos_cuestionario
+          WHERE puesto_id = $1
+          `,
+          [
+            puesto.id,
+          ],
+        );
+
+
+        // ==============================================
+        // 7. RELACIONES DE RIESGOS
+        // ==============================================
+
+        await client.query(
+          `
+          DELETE FROM puestos_riesgos
+          WHERE puesto_id = $1
+          `,
+          [
+            puesto.id,
+          ],
+        );
+
+
+        // ==============================================
+        // 8. RELACIONES DE EPP
+        // ==============================================
+
+        await client.query(
+          `
+          DELETE FROM puestos_epp
+          WHERE puesto_id = $1
+          `,
+          [
+            puesto.id,
+          ],
+        );
+
+
+        // ==============================================
+        // 9. RELACIONES DE NORMAS
+        // ==============================================
+
+        await client.query(
+          `
+          DELETE FROM puestos_normas
+          WHERE puesto_id = $1
+          `,
+          [
+            puesto.id,
+          ],
+        );
+
+
+        // ==============================================
+        // 10. OBTENER cuestionarios_info
+        // ==============================================
+
+        const infos =
           await client.query(
-            "DELETE FROM documentos_cuestionario WHERE cuestionario_info_id = $1",
-            [info.id],
+            `
+            SELECT id
+            FROM cuestionarios_info
+            WHERE puesto_id = $1
+            `,
+            [
+              puesto.id,
+            ],
+          );
+
+
+        // ==============================================
+        // RECORRER INFORMACIÓN DE CUESTIONARIOS
+        // ==============================================
+
+        for (
+          const info
+          of infos.rows
+        ) {
+
+
+          // ============================================
+          // 11. ELIMINAR RESPUESTAS
+          // ============================================
+
+          await client.query(
+            `
+            DELETE FROM cuestionarios
+            WHERE info_id = $1
+            `,
+            [
+              info.id,
+            ],
+          );
+
+
+          // ============================================
+          // 12. DOCUMENTOS ANTIGUOS
+          // LIGADOS A cuestionario_info_id
+          // ============================================
+
+          await client.query(
+            `
+            DELETE FROM documentos_cuestionario
+            WHERE cuestionario_info_id = $1
+            `,
+            [
+              info.id,
+            ],
           );
         }
 
-        // 6️⃣ Eliminar info cuestionarios
+
+        // ==============================================
+        // 13. ELIMINAR cuestionarios_info
+        // ==============================================
+
         await client.query(
-          "DELETE FROM cuestionarios_info WHERE puesto_id = $1",
-          [puesto.id],
+          `
+          DELETE FROM cuestionarios_info
+          WHERE puesto_id = $1
+          `,
+          [
+            puesto.id,
+          ],
         );
 
-        // 7️⃣ Eliminar puesto
-        await client.query("DELETE FROM puestos_trabajo WHERE id = $1", [
-          puesto.id,
-        ]);
+
+        // ==============================================
+        // 14. ELIMINAR PUESTO
+        // ==============================================
+
+        await client.query(
+          `
+          DELETE FROM puestos_trabajo
+          WHERE id = $1
+          `,
+          [
+            puesto.id,
+          ],
+        );
       }
 
-      // 8️⃣ Eliminar área
-      await client.query("DELETE FROM areas_trabajo WHERE id = $1", [area.id]);
+
+      // =================================================
+      // 15. ELIMINAR ÁREA
+      // =================================================
+
+      await client.query(
+        `
+        DELETE FROM areas_trabajo
+        WHERE id = $1
+        `,
+        [
+          area.id,
+        ],
+      );
     }
 
-    // 9️⃣ Eliminar cliente
-    await client.query("DELETE FROM clientes WHERE id = $1", [clienteId]);
 
-    await client.query("COMMIT");
+    // ==================================================
+    // 16. ELIMINAR CLIENTE
+    // ==================================================
+
+    await client.query(
+      `
+      DELETE FROM clientes
+      WHERE id = $1
+      `,
+      [
+        clienteId,
+      ],
+    );
+
+
+    // ==================================================
+    // 17. CONFIRMAR TRANSACCIÓN
+    // ==================================================
+
+    await client.query(
+      "COMMIT",
+    );
+
+
+    console.log(
+      "====================================",
+    );
+
+    console.log(
+      "CLIENTE ELIMINADO CORRECTAMENTE",
+    );
+
+    console.log(
+      "CLIENTE ID:",
+      clienteId,
+    );
+
+    console.log(
+      "====================================",
+    );
+
 
     res.json({
       success: true,
-      message: "Cliente eliminado correctamente",
+      message:
+        "Cliente eliminado correctamente",
     });
-  } catch (error) {
-    await client.query("ROLLBACK");
 
-    console.error("❌ Error eliminando cliente:", error);
+  } catch (error) {
+
+    // ==================================================
+    // ERROR → DESHACER TODO
+    // ==================================================
+
+    await client.query(
+      "ROLLBACK",
+    );
+
+
+    console.error(
+      "====================================",
+    );
+
+    console.error(
+      "ERROR ELIMINANDO CLIENTE:",
+      error,
+    );
+
+    console.error(
+      "====================================",
+    );
+
 
     res.status(500).json({
+
       success: false,
-      message: error.message,
-      detail: error.detail,
-      table: error.table,
-      constraint: error.constraint,
+
+      message:
+        error.message,
+
+      detail:
+        error.detail,
+
+      table:
+        error.table,
+
+      constraint:
+        error.constraint,
     });
+
   } finally {
+
     client.release();
   }
 });
@@ -1540,70 +2199,232 @@ app.get("/reportes-nom/:clienteId", async (req, res) => {
 // OBTENER DOCUMENTOS ARP Y FICHA DE NOM POR CLIENTE
 // ======================================================
 
-app.get("/documentos-nom-cliente/:clienteId", async (req, res) => {
-  try {
-    const { clienteId } = req.params;
+// ======================================================
+// OBTENER DOCUMENTOS ARP Y FICHA POR CLIENTE
+//
+// COMPATIBLE CON:
+// 1. Documentos nuevos ligados directamente al puesto
+// 2. Documentos antiguos ligados al cuestionario
+// ======================================================
 
-    console.log("====================================");
-    console.log("CONSULTANDO ARP / FICHA");
-    console.log("CLIENTE:", clienteId);
-    console.log("====================================");
+app.get(
+  "/documentos-nom-cliente/:clienteId",
+  async (req, res) => {
 
-    const result = await db.query(
-      `
-      SELECT
-        dc.id,
-        dc.cuestionario_info_id,
-        dc.tipo,
-        dc.archivo,
-        dc.created_at,
+    try {
 
-        ci.nom,
-        ci.subopcion_id,
-        ci.puesto_id,
+      const {
+        clienteId,
+      } = req.params;
 
-        pt.puesto AS puesto_nombre,
-        at.id AS area_id,
-        at.nombre_area,
-        c.id AS cliente_id,
-        c.nombre_empresa AS cliente_nombre
 
-      FROM documentos_cuestionario dc
+      console.log(
+        "====================================",
+      );
 
-      INNER JOIN cuestionarios_info ci
-        ON ci.id = dc.cuestionario_info_id
+      console.log(
+        "CONSULTANDO DOCUMENTOS ARP / FICHA",
+      );
 
-      INNER JOIN puestos_trabajo pt
-        ON pt.id = ci.puesto_id
+      console.log(
+        "CLIENTE:",
+        clienteId,
+      );
 
-      INNER JOIN areas_trabajo at
-        ON at.id = pt.area_id
+      console.log(
+        "====================================",
+      );
 
-      INNER JOIN clientes c
-        ON c.id = at.cliente_id
 
-      WHERE c.id = $1
-        AND dc.tipo IN ('ARP', 'FICHA')
+      const result = await db.query(
+        `
+        SELECT
 
-      ORDER BY dc.created_at DESC
-      `,
-      [clienteId],
-    );
+          /* =====================================
+             DOCUMENTO
+          ===================================== */
 
-    console.log(
-      "DOCUMENTOS ARP/FICHA ENCONTRADOS:",
-      result.rows.length,
-    );
+          dc.id,
 
-    res.json(result.rows);
-  } catch (error) {
-    console.error("ERROR OBTENIENDO ARP/FICHA:", error);
+          dc.cuestionario_info_id,
 
-    res.status(500).json({
-      error: "No fue posible obtener los documentos ARP y FICHA.",
-    });
-  }
-});
+          dc.puesto_id AS documento_puesto_id,
+
+          dc.tipo,
+
+          dc.archivo,
+
+          dc.created_at,
+
+
+          /* =====================================
+             INFORMACIÓN NOM
+             PUEDE SER NULL EN DOCUMENTOS NUEVOS
+          ===================================== */
+
+          ci.nom,
+
+          ci.subopcion_id,
+
+
+          /* =====================================
+             PUESTO REAL
+
+             NUEVO:
+             dc.puesto_id
+
+             ANTIGUO:
+             ci.puesto_id
+          ===================================== */
+
+          COALESCE(
+            dc.puesto_id,
+            ci.puesto_id
+          ) AS puesto_id,
+
+
+          /* =====================================
+             PUESTO
+          ===================================== */
+
+          pt.puesto AS puesto_nombre,
+
+
+          /* =====================================
+             ÁREA
+          ===================================== */
+
+          at.id AS area_id,
+
+          at.nombre_area,
+
+
+          /* =====================================
+             CLIENTE
+          ===================================== */
+
+          c.id AS cliente_id,
+
+          c.nombre_empresa AS cliente_nombre,
+
+
+          /* =====================================
+             ORIGEN DEL DOCUMENTO
+          ===================================== */
+
+          CASE
+
+            WHEN dc.puesto_id IS NOT NULL
+              THEN 'PUESTO'
+
+            WHEN dc.cuestionario_info_id IS NOT NULL
+              THEN 'CUESTIONARIO'
+
+            ELSE 'DESCONOCIDO'
+
+          END AS origen
+
+
+        FROM documentos_cuestionario dc
+
+
+        /* =====================================
+           CUESTIONARIO
+
+           LEFT JOIN PORQUE LOS NUEVOS
+           DOCUMENTOS NO TIENEN cuestionario_info_id
+        ===================================== */
+
+        LEFT JOIN cuestionarios_info ci
+          ON ci.id = dc.cuestionario_info_id
+
+
+        /* =====================================
+           PUESTO
+
+           BUSCAR POR:
+           - puesto_id directo
+           - o puesto_id del cuestionario
+        ===================================== */
+
+        INNER JOIN puestos_trabajo pt
+          ON pt.id = COALESCE(
+            dc.puesto_id,
+            ci.puesto_id
+          )
+
+
+        /* =====================================
+           ÁREA
+        ===================================== */
+
+        INNER JOIN areas_trabajo at
+          ON at.id = pt.area_id
+
+
+        /* =====================================
+           CLIENTE
+        ===================================== */
+
+        INNER JOIN clientes c
+          ON c.id = at.cliente_id
+
+
+        /* =====================================
+           FILTRO
+        ===================================== */
+
+        WHERE c.id = $1
+
+          AND dc.tipo IN (
+            'ARP',
+            'FICHA'
+          )
+
+
+        /* =====================================
+           ORDEN
+
+           PRIMERO DOCUMENTOS NUEVOS
+           Y MÁS RECIENTES
+        ===================================== */
+
+        ORDER BY
+          dc.created_at DESC,
+          dc.id DESC
+        `,
+
+        [
+          clienteId,
+        ],
+      );
+
+
+      console.log(
+        "DOCUMENTOS ARP/FICHA ENCONTRADOS:",
+        result.rows.length,
+      );
+
+
+      res.json(
+        result.rows,
+      );
+
+    } catch (error) {
+
+      console.error(
+        "ERROR OBTENIENDO ARP/FICHA:",
+        error,
+      );
+
+
+      res.status(500).json({
+        error:
+          "No fue posible obtener los documentos ARP y FICHA.",
+      });
+    }
+  },
+);
 
 // ======================================================
 // OBTENER TODAS LAS FICHAS TÉCNICAS Y CERTIFICADOS EPP
