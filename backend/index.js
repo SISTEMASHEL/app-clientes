@@ -1467,6 +1467,75 @@ app.get("/reportes-nom/:clienteId", async (req, res) => {
   }
 });
 
+// ======================================================
+// OBTENER DOCUMENTOS ARP Y FICHA DE NOM POR CLIENTE
+// ======================================================
+
+app.get("/documentos-nom-cliente/:clienteId", async (req, res) => {
+  try {
+    const { clienteId } = req.params;
+
+    console.log("====================================");
+    console.log("CONSULTANDO ARP / FICHA");
+    console.log("CLIENTE:", clienteId);
+    console.log("====================================");
+
+    const result = await pool.query(
+      `
+      SELECT
+        dc.id,
+        dc.cuestionario_info_id,
+        dc.tipo,
+        dc.archivo,
+        dc.created_at,
+
+        ci.nom,
+        ci.subopcion_id,
+        ci.puesto_id,
+
+        pt.puesto AS puesto_nombre,
+        at.id AS area_id,
+        at.nombre_area,
+        c.id AS cliente_id,
+        c.nombre_empresa AS cliente_nombre
+
+      FROM documentos_cuestionario dc
+
+      INNER JOIN cuestionarios_info ci
+        ON ci.id = dc.cuestionario_info_id
+
+      INNER JOIN puestos_trabajo pt
+        ON pt.id = ci.puesto_id
+
+      INNER JOIN areas_trabajo at
+        ON at.id = pt.area_id
+
+      INNER JOIN clientes c
+        ON c.id = at.cliente_id
+
+      WHERE c.id = $1
+        AND dc.tipo IN ('ARP', 'FICHA')
+
+      ORDER BY dc.created_at DESC
+      `,
+      [clienteId],
+    );
+
+    console.log(
+      "DOCUMENTOS ARP/FICHA ENCONTRADOS:",
+      result.rows.length,
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error("ERROR OBTENIENDO ARP/FICHA:", error);
+
+    res.status(500).json({
+      error: "No fue posible obtener los documentos ARP y FICHA.",
+    });
+  }
+});
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
