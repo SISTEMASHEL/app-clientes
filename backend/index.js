@@ -306,18 +306,87 @@ app.post("/cliente", async (req, res) => {
   }
 });
 
+// =====================================================
 // OBTENER CLIENTES
+// ADMIN ID = 1 VE TODOS
+// LOS DEMÁS USUARIOS SOLO VEN LOS SUYOS
+// =====================================================
+
 app.get("/clientes/:usuarioId", async (req, res) => {
   try {
-    const result = await db.query(
-      "SELECT * FROM clientes WHERE usuario_id = $1 ORDER BY id DESC",
-      [req.params.usuarioId],
+    const usuarioId = parseInt(req.params.usuarioId, 10);
+
+    console.log("====================================");
+    console.log("CONSULTANDO CLIENTES");
+    console.log("USUARIO ID:", usuarioId);
+    console.log("====================================");
+
+    let result;
+
+    // =================================================
+    // ADMINISTRADOR
+    // ID = 1
+    // =================================================
+
+    if (usuarioId === 1) {
+      console.log("MODO ADMINISTRADOR - MOSTRANDO TODOS LOS CLIENTES");
+
+      result = await db.query(`
+        SELECT
+          c.*,
+          u.usuario AS usuario_registro
+        FROM clientes c
+
+        LEFT JOIN usuarios u
+          ON u.id = c.usuario_id
+
+        ORDER BY c.id DESC
+      `);
+    }
+
+    // =================================================
+    // USUARIO NORMAL
+    // SOLO SUS CLIENTES
+    // =================================================
+
+    else {
+      console.log(
+        "USUARIO NORMAL - MOSTRANDO SOLO SUS CLIENTES",
+      );
+
+      result = await db.query(
+        `
+        SELECT
+          c.*,
+          u.usuario AS usuario_registro
+        FROM clientes c
+
+        LEFT JOIN usuarios u
+          ON u.id = c.usuario_id
+
+        WHERE c.usuario_id = $1
+
+        ORDER BY c.id DESC
+        `,
+        [usuarioId],
+      );
+    }
+
+    console.log(
+      "CLIENTES ENCONTRADOS:",
+      result.rows.length,
     );
 
     res.json(result.rows);
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ error: "Error al obtener clientes" });
+    console.error(
+      "ERROR OBTENIENDO CLIENTES:",
+      error,
+    );
+
+    res.status(500).json({
+      error: "Error al obtener clientes",
+    });
   }
 });
 
