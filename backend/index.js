@@ -1480,7 +1480,7 @@ app.get("/documentos-nom-cliente/:clienteId", async (req, res) => {
     console.log("CLIENTE:", clienteId);
     console.log("====================================");
 
-    const result = await pool.query(
+    const result = await db.query(
       `
       SELECT
         dc.id,
@@ -1532,6 +1532,82 @@ app.get("/documentos-nom-cliente/:clienteId", async (req, res) => {
 
     res.status(500).json({
       error: "No fue posible obtener los documentos ARP y FICHA.",
+    });
+  }
+});
+
+// ======================================================
+// OBTENER TODAS LAS FICHAS TÉCNICAS Y CERTIFICADOS EPP
+// DE UN CLIENTE
+// ======================================================
+
+app.get("/documentos-epp-cliente/:clienteId", async (req, res) => {
+  try {
+    const { clienteId } = req.params;
+
+    console.log("====================================");
+    console.log("CONSULTANDO DOCUMENTOS EPP");
+    console.log("CLIENTE:", clienteId);
+    console.log("====================================");
+
+    const result = await db.query(
+      `
+      SELECT
+        i.id,
+        i.cliente_id,
+        i.area_id,
+        i.puesto_id,
+
+        i.clave_producto,
+        i.nombre_producto,
+        i.marca,
+        i.descripcion,
+
+        i.ficha_tecnica,
+        i.certificado,
+
+        a.nombre_area,
+        p.puesto AS puesto_nombre
+
+      FROM inventario i
+
+      LEFT JOIN areas_trabajo a
+        ON a.id = i.area_id
+
+      LEFT JOIN puestos_trabajo p
+        ON p.id = i.puesto_id
+
+      WHERE i.cliente_id = $1
+        AND i.tipo_producto = 'EPP'
+        AND (
+          i.ficha_tecnica IS NOT NULL
+          OR i.certificado IS NOT NULL
+        )
+
+      ORDER BY
+        a.nombre_area,
+        p.puesto,
+        i.nombre_producto,
+        i.id DESC
+      `,
+      [clienteId],
+    );
+
+    console.log(
+      "DOCUMENTOS EPP ENCONTRADOS:",
+      result.rows.length,
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error(
+      "ERROR OBTENIENDO DOCUMENTOS EPP:",
+      error,
+    );
+
+    res.status(500).json({
+      error:
+        "No fue posible obtener las fichas técnicas y certificados del EPP.",
     });
   }
 });
