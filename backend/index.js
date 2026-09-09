@@ -151,15 +151,42 @@ const storage = multer.diskStorage({
 
 const storageReportesNom = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, reportesNomDir);
+    console.log(
+      "GUARDANDO REPORTE NOM EN:",
+      reportesNomDir,
+    );
+
+    cb(
+      null,
+      reportesNomDir,
+    );
   },
 
   filename: (req, file, cb) => {
-    const nombreOriginal = path.basename(file.originalname);
+    let extension = path
+      .extname(
+        file.originalname || "",
+      )
+      .toLowerCase();
 
-    const nombreArchivo = `${Date.now()}-${nombreOriginal}`;
+    if (!extension) {
+      extension = ".pdf";
+    }
 
-    cb(null, nombreArchivo);
+    const nombreArchivo =
+      `${Date.now()}-${Math.round(
+        Math.random() * 1e9,
+      )}${extension}`;
+
+    console.log(
+      "NOMBRE FÍSICO REPORTE NOM:",
+      nombreArchivo,
+    );
+
+    cb(
+      null,
+      nombreArchivo,
+    );
   },
 });
 
@@ -167,35 +194,80 @@ const uploadReporteNom = multer({
   storage: storageReportesNom,
 
   fileFilter: (req, file, cb) => {
-    const extension = path.extname(file.originalname || "").toLowerCase();
+    console.log(
+      "====================================",
+    );
+
+    console.log(
+      "VALIDANDO REPORTE NOM",
+    );
+
+    console.log(
+      "Nombre:",
+      file.originalname,
+    );
+
+    console.log(
+      "MIME:",
+      file.mimetype,
+    );
+
+    console.log(
+      "====================================",
+    );
+
+    const extension = path
+      .extname(
+        file.originalname || "",
+      )
+      .toLowerCase();
 
     const esPdf =
-      file.mimetype === "application/pdf" ||
-      file.mimetype === "application/octet-stream" ||
+      file.mimetype ===
+        "application/pdf" ||
+      file.mimetype ===
+        "application/octet-stream" ||
       extension === ".pdf";
 
-    console.log("VALIDANDO REPORTE NOM:", {
-      originalname: file.originalname,
-      mimetype: file.mimetype,
-      extension,
-      esPdf,
-    });
-
     if (esPdf) {
-      return cb(null, true);
+      return cb(
+        null,
+        true,
+      );
     }
 
-    cb(new Error("Solo se permiten archivos PDF"), false);
+    cb(
+      new Error(
+        "Solo se permiten archivos PDF",
+      ),
+      false,
+    );
   },
 
   limits: {
-    fileSize: 50 * 1024 * 1024,
+    fileSize:
+      50 * 1024 * 1024,
   },
 });
 
 // =====================================================
 // SUBIR DOCUMENTOS DE REPORTES NOM
 // OPCIONES 1 A 12
+// =====================================================
+
+// =====================================================
+// SUBIR / REEMPLAZAR DOCUMENTOS DE REPORTES NOM
+// OPCIONES 1 A 12
+//
+// GUARDA FÍSICAMENTE EN:
+// /uploads/reportes_nom
+//
+// GUARDA EN BD UNA RUTA COMO:
+// /uploads/reportes_nom/1788984000000-123456789.pdf
+//
+// SI YA EXISTE:
+// cliente_id + opcion_nom + tipo_documento
+// SE ACTUALIZA EN VEZ DE INSERTAR OTRO REGISTRO
 // =====================================================
 
 app.post(
@@ -216,6 +288,10 @@ app.post(
         tipo_documento,
       } = req.body;
 
+      // =================================================
+      // VALIDAR ARCHIVO
+      // =================================================
+
       if (!req.file) {
         return res.status(400).json({
           success: false,
@@ -223,53 +299,169 @@ app.post(
         });
       }
 
+      // =================================================
+      // VALIDAR CLIENTE
+      // =================================================
+
       if (!cliente_id) {
+        // Eliminar archivo recién subido si faltan datos
+        try {
+          if (req.file?.path && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+          }
+        } catch (errorEliminar) {
+          console.log(
+            "No se pudo eliminar archivo temporal:",
+            errorEliminar.message,
+          );
+        }
+
         return res.status(400).json({
           success: false,
           error: "cliente_id es requerido",
         });
       }
 
+      // =================================================
+      // VALIDAR OPCIÓN NOM
+      // =================================================
+
       if (!opcion_nom) {
+        try {
+          if (req.file?.path && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+          }
+        } catch (errorEliminar) {
+          console.log(
+            "No se pudo eliminar archivo temporal:",
+            errorEliminar.message,
+          );
+        }
+
         return res.status(400).json({
           success: false,
           error: "opcion_nom es requerido",
         });
       }
 
+      // =================================================
+      // VALIDAR TIPO DOCUMENTO
+      // =================================================
+
       if (!tipo_documento) {
+        try {
+          if (req.file?.path && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+          }
+        } catch (errorEliminar) {
+          console.log(
+            "No se pudo eliminar archivo temporal:",
+            errorEliminar.message,
+          );
+        }
+
         return res.status(400).json({
           success: false,
           error: "tipo_documento es requerido",
         });
       }
 
+      // =================================================
+      // NOMBRE ORIGINAL LIMPIO
+      //
+      // Ejemplo recibido:
+      // Tabla%20I.1.pdf
+      //
+      // Queda:
+      // Tabla I.1.pdf
+      // =================================================
+
+      let nombreOriginalLimpio =
+        req.file.originalname || "documento.pdf";
+
+      try {
+        nombreOriginalLimpio =
+          decodeURIComponent(nombreOriginalLimpio);
+      } catch (errorDecode) {
+        console.log(
+          "No fue necesario decodificar el nombre:",
+          nombreOriginalLimpio,
+        );
+      }
+
+      // =================================================
+      // RUTA PÚBLICA A GUARDAR EN POSTGRESQL
+      //
+      // IMPORTANTE:
+      // físicamente el archivo está en:
+      // /uploads/reportes_nom/archivo.pdf
+      //
+      // y esa misma ruta pública funciona con Express:
+      // https://app-clientes-sr5h.onrender.com/uploads/reportes_nom/archivo.pdf
+      // =================================================
+
       const ruta =
         `/uploads/reportes_nom/${req.file.filename}`;
 
-      console.log("Archivo físico:", req.file.filename);
-      console.log("Nombre original:", req.file.originalname);
+      console.log("=================================");
+      console.log("DATOS DEL ARCHIVO");
+      console.log("Nombre físico:", req.file.filename);
+      console.log("Nombre original:", nombreOriginalLimpio);
+      console.log("Ruta física:", req.file.path);
       console.log("Ruta BD:", ruta);
       console.log("Cliente:", cliente_id);
       console.log("Opción NOM:", opcion_nom);
       console.log("Tipo documento:", tipo_documento);
+      console.log("=================================");
 
-      // =====================================================
-      // BUSCAR SI YA EXISTE UN DOCUMENTO PARA ESA COMBINACIÓN
-      // =====================================================
+      // =================================================
+      // VERIFICAR QUE EL CLIENTE EXISTA
+      // =================================================
+
+      const clienteExiste = await db.query(
+        `
+        SELECT id
+        FROM clientes
+        WHERE id = $1
+        `,
+        [cliente_id],
+      );
+
+      if (clienteExiste.rows.length === 0) {
+        try {
+          if (req.file?.path && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+          }
+        } catch (errorEliminar) {
+          console.log(
+            "No se pudo eliminar archivo nuevo:",
+            errorEliminar.message,
+          );
+        }
+
+        return res.status(404).json({
+          success: false,
+          error: "El cliente indicado no existe",
+        });
+      }
+
+      // =================================================
+      // BUSCAR SI YA EXISTE ESA COMBINACIÓN
+      //
+      // Esto coincide con tu constraint:
+      // unique_reporte_nom_documento
+      // =================================================
 
       const existente = await db.query(
         `
         SELECT
           id,
+          nombre_archivo,
           archivo
-
         FROM reportes_nom
-
         WHERE cliente_id = $1
           AND opcion_nom = $2
           AND tipo_documento = $3
-
         LIMIT 1
         `,
         [
@@ -279,16 +471,15 @@ app.post(
         ],
       );
 
-      let result;
-
-      // =====================================================
+      // =================================================
       // SI YA EXISTE -> ACTUALIZAR
-      // =====================================================
+      // =================================================
 
       if (existente.rows.length > 0) {
-        const anterior = existente.rows[0];
+        const anterior =
+          existente.rows[0];
 
-        result = await db.query(
+        const result = await db.query(
           `
           UPDATE reportes_nom
 
@@ -302,15 +493,17 @@ app.post(
           RETURNING *
           `,
           [
-            req.file.originalname,
+            nombreOriginalLimpio,
             ruta,
             anterior.id,
           ],
         );
 
-        // ===================================================
-        // BORRAR ARCHIVO ANTERIOR DEL DISK
-        // ===================================================
+        // =================================================
+        // ELIMINAR PDF ANTERIOR DEL DISK
+        //
+        // SOLO DESPUÉS DE QUE EL UPDATE FUE CORRECTO
+        // =================================================
 
         try {
           if (
@@ -320,7 +513,9 @@ app.post(
             )
           ) {
             const nombreAnterior =
-              path.basename(anterior.archivo);
+              path.basename(
+                anterior.archivo,
+              );
 
             const rutaAnterior =
               path.join(
@@ -328,44 +523,55 @@ app.post(
                 nombreAnterior,
               );
 
+            // Evitar borrar el mismo archivo nuevo
             if (
+              rutaAnterior !==
+                req.file.path &&
               fs.existsSync(rutaAnterior)
             ) {
               fs.unlinkSync(rutaAnterior);
 
               console.log(
-                "Archivo anterior eliminado:",
+                "PDF anterior eliminado del Disk:",
                 rutaAnterior,
               );
             }
           }
         } catch (errorEliminar) {
           console.log(
-            "No se pudo eliminar el archivo anterior:",
+            "No fue posible eliminar el PDF anterior:",
             errorEliminar.message,
           );
         }
 
         console.log(
-          "REPORTE NOM ACTUALIZADO:",
+          "=================================",
+        );
+        console.log(
+          "REPORTE NOM ACTUALIZADO",
+        );
+        console.log(
           result.rows[0],
+        );
+        console.log(
+          "=================================",
         );
 
         return res.json({
           success: true,
           mensaje:
             "PDF actualizado correctamente",
+          actualizado: true,
           reporte:
             result.rows[0],
-          actualizado: true,
         });
       }
 
-      // =====================================================
+      // =================================================
       // SI NO EXISTE -> INSERTAR
-      // =====================================================
+      // =================================================
 
-      result = await db.query(
+      const result = await db.query(
         `
         INSERT INTO reportes_nom
         (
@@ -389,46 +595,69 @@ app.post(
           cliente_id,
           opcion_nom,
           tipo_documento,
-          req.file.originalname,
+          nombreOriginalLimpio,
           ruta,
         ],
       );
 
       console.log(
-        "REPORTE NOM CREADO:",
+        "=================================",
+      );
+      console.log(
+        "NUEVO REPORTE NOM GUARDADO",
+      );
+      console.log(
         result.rows[0],
+      );
+      console.log(
+        "=================================",
       );
 
       res.json({
         success: true,
         mensaje:
           "PDF subido correctamente",
+        actualizado: false,
         reporte:
           result.rows[0],
-        actualizado: false,
       });
+
     } catch (error) {
+      console.error(
+        "=================================",
+      );
+
       console.error(
         "❌ ERROR SUBIENDO REPORTE NOM:",
         error,
       );
 
-      // ================================================
-      // SI HUBO ERROR DE BD, BORRAR EL PDF NUEVO
-      // PARA NO DEJAR ARCHIVOS HUÉRFANOS EN EL DISK
-      // ================================================
+      console.error(
+        "=================================",
+      );
+
+      // =================================================
+      // SI FALLÓ POSTGRESQL
+      // ELIMINAR PDF NUEVO PARA NO DEJAR BASURA EN EL DISK
+      // =================================================
 
       try {
-        if (req.file?.path) {
-          if (
-            fs.existsSync(req.file.path)
-          ) {
-            fs.unlinkSync(req.file.path);
-          }
+        if (
+          req.file?.path &&
+          fs.existsSync(req.file.path)
+        ) {
+          fs.unlinkSync(
+            req.file.path,
+          );
+
+          console.log(
+            "PDF nuevo eliminado por error:",
+            req.file.path,
+          );
         }
       } catch (errorEliminar) {
         console.log(
-          "Error eliminando archivo fallido:",
+          "No se pudo eliminar PDF fallido:",
           errorEliminar.message,
         );
       }
