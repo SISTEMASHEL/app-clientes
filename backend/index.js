@@ -46,33 +46,106 @@ const uploadsDir = process.env.RENDER
   ? "/uploads"
   : path.join(__dirname, "uploads");
 
-// ✅ asegurar que exista en Render/local
+console.log("====================================");
+console.log("ALMACENAMIENTO DE ARCHIVOS");
+console.log("Render:", !!process.env.RENDER);
+console.log("uploadsDir:", uploadsDir);
+console.log("====================================");
+
+// Asegurar que exista la carpeta física del Disk
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Carpeta exclusiva para los reportes NOM
+// Carpeta exclusiva para reportes NOM dentro del mismo Disk
 const reportesNomDir = path.join(uploadsDir, "reportes_nom");
 
 if (!fs.existsSync(reportesNomDir)) {
   fs.mkdirSync(reportesNomDir, { recursive: true });
 }
 
-app.use("/uploads", express.static(uploadsDir));
+// Servir públicamente TODO lo almacenado en el Disk de Render.
+// Ruta física: /uploads/archivo.pdf
+// URL pública: https://app-clientes-sr5h.onrender.com/uploads/archivo.pdf
+app.use(
+  "/uploads",
+  express.static(uploadsDir, {
+    setHeaders: (res, filePath) => {
+      const ext = path.extname(filePath).toLowerCase();
 
-// Test directo
-app.get("/test-upload", (req, res) => {
-  res.sendFile(path.join(uploadsDir, "1783093855682.jpg"));
+      if (ext === ".pdf") {
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", "inline");
+      }
+
+      // Evita que el navegador conserve una respuesta 404 antigua
+      // cuando un archivo acaba de ser reemplazado.
+      res.setHeader("Cache-Control", "no-cache");
+    },
+  }),
+);
+
+// Diagnóstico del Disk
+app.get("/debug-storage", (req, res) => {
+  try {
+    const existe = fs.existsSync(uploadsDir);
+    const archivos = existe ? fs.readdirSync(uploadsDir) : [];
+
+    res.json({
+      success: true,
+      render: !!process.env.RENDER,
+      uploadsDir,
+      existe,
+      archivos,
+      reportesNomDir,
+      reportesNomExiste: fs.existsSync(reportesNomDir),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      uploadsDir,
+      error: error.message,
+    });
+  }
+});
+
+// Diagnóstico de un archivo específico del directorio principal
+app.get("/debug-file/:filename", (req, res) => {
+  try {
+    const nombre = path.basename(req.params.filename);
+    const ruta = path.join(uploadsDir, nombre);
+    const existe = fs.existsSync(ruta);
+
+    res.json({
+      success: true,
+      nombre,
+      ruta,
+      existe,
+      size: existe ? fs.statSync(ruta).size : 0,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
 });
 
 // ------------------- MULTER CORREGIDO -------------------
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, uploadsDir); // ✅ MISMA CARPETA QUE EXPRESS
+    console.log("GUARDANDO ARCHIVO EN:", uploadsDir);
+    cb(null, uploadsDir);
   },
+
   filename: function (req, file, cb) {
-    const ext = path.extname(file.originalname);
-    cb(null, Date.now() + ext);
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    const nombre = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+
+    console.log("ARCHIVO ORIGINAL:", file.originalname);
+    console.log("ARCHIVO FÍSICO:", nombre);
+
+    cb(null, nombre);
   },
 });
 
@@ -94,11 +167,29 @@ const uploadReporteNom = multer({
   storage: storageReportesNom,
 
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === "application/pdf") {
-      cb(null, true);
-    } else {
-      cb(new Error("Solo se permiten archivos PDF"));
+    const extension = path.extname(file.originalname || "").toLowerCase();
+
+    const esPdf =
+      file.mimetype === "application/pdf" ||
+      file.mimetype === "application/octet-stream" ||
+      extension === ".pdf";
+
+    console.log("VALIDANDO REPORTE NOM:", {
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      extension,
+      esPdf,
+    });
+
+    if (esPdf) {
+      return cb(null, true);
     }
+
+    cb(new Error("Solo se permiten archivos PDF"), false);
+  },
+
+  limits: {
+    fileSize: 50 * 1024 * 1024,
   },
 });
 
@@ -250,18 +341,42 @@ app.get("/test-uploads", (req, res) => {
 });
 
 const fileFilter = (req, file, cb) => {
-  const permitidos = ["image/jpeg", "image/jpg", "application/pdf"];
+  const extension = path.extname(file.originalname || "").toLowerCase();
 
-  if (permitidos.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error("Tipo de archivo no permitido"), false);
+  const esPdf =
+    file.mimetype === "application/pdf" ||
+    file.mimetype === "application/octet-stream" ||
+    extension === ".pdf";
+
+  const esImagen =
+    file.mimetype === "image/jpeg" ||
+    file.mimetype === "image/jpg" ||
+    file.mimetype === "image/png" ||
+    extension === ".jpg" ||
+    extension === ".jpeg" ||
+    extension === ".png";
+
+  console.log("VALIDANDO ARCHIVO:", {
+    originalname: file.originalname,
+    mimetype: file.mimetype,
+    extension,
+    esPdf,
+    esImagen,
+  });
+
+  if (esPdf || esImagen) {
+    return cb(null, true);
   }
+
+  cb(new Error("Tipo de archivo no permitido"), false);
 };
 
 const upload = multer({
   storage,
   fileFilter,
+  limits: {
+    fileSize: 50 * 1024 * 1024,
+  },
 });
 
 // ------------------- RUTAS (TODO IGUAL) -------------------
@@ -790,7 +905,7 @@ app.post("/documentos", upload.single("archivo"), async (req, res) => {
 
       const existente = await db.query(
         `
-        SELECT id
+        SELECT id, archivo
         FROM documentos_cuestionario
         WHERE puesto_id = $1
           AND tipo = $2
@@ -807,23 +922,38 @@ app.post("/documentos", upload.single("archivo"), async (req, res) => {
       // -------------------------------------------------
 
       if (existente.rows.length > 0) {
+        const archivoAnterior = existente.rows[0].archivo;
+
         result = await db.query(
           `
           UPDATE documentos_cuestionario
-
           SET
             archivo = $1,
             created_at = CURRENT_TIMESTAMP
-
           WHERE id = $2
-
           RETURNING *
           `,
-          [
-            ruta,
-            existente.rows[0].id,
-          ],
+          [ruta, existente.rows[0].id],
         );
+
+        // Eliminar el archivo físico anterior solamente después de actualizar BD.
+        // Así evitamos acumular PDFs reemplazados en el Disk.
+        if (archivoAnterior && archivoAnterior.startsWith("/uploads/")) {
+          const nombreAnterior = path.basename(archivoAnterior);
+          const rutaAnterior = path.join(uploadsDir, nombreAnterior);
+
+          if (fs.existsSync(rutaAnterior) && rutaAnterior !== req.file.path) {
+            try {
+              fs.unlinkSync(rutaAnterior);
+              console.log("ARCHIVO ANTERIOR ELIMINADO:", rutaAnterior);
+            } catch (unlinkError) {
+              console.warn(
+                "No se pudo eliminar el archivo anterior:",
+                unlinkError.message,
+              );
+            }
+          }
+        }
       }
 
       // -------------------------------------------------
@@ -2500,6 +2630,34 @@ app.get("/documentos-epp-cliente/:clienteId", async (req, res) => {
         "No fue posible obtener las fichas técnicas y certificados del EPP.",
     });
   }
+});
+
+// ======================================================
+// MANEJO GLOBAL DE ERRORES DE MULTER / UPLOADS
+// ======================================================
+app.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    console.error("MULTER ERROR:", error);
+
+    return res.status(400).json({
+      success: false,
+      error:
+        error.code === "LIMIT_FILE_SIZE"
+          ? "El archivo supera el límite de 50 MB"
+          : error.message,
+    });
+  }
+
+  if (error) {
+    console.error("ERROR GLOBAL:", error);
+
+    return res.status(400).json({
+      success: false,
+      error: error.message || "Error procesando la solicitud",
+    });
+  }
+
+  next();
 });
 
 // ------------------- INICIAR SERVIDOR -------------------
