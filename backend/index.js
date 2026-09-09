@@ -139,8 +139,27 @@ const storage = multer.diskStorage({
   },
 
   filename: function (req, file, cb) {
-    const ext = path.extname(file.originalname || "").toLowerCase();
-    const nombre = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+    let extension = path
+      .extname(file.originalname || "")
+      .toLowerCase();
+
+    const esPdf =
+      file.mimetype === "application/pdf" ||
+      file.mimetype === "application/octet-stream" ||
+      extension === ".pdf";
+
+    if (esPdf) {
+      extension = ".pdf";
+    }
+
+    if (!extension) {
+      extension = "";
+    }
+
+    const nombre =
+      `${Date.now()}-${Math.round(
+        Math.random() * 1e9,
+      )}${extension}`;
 
     console.log("ARCHIVO ORIGINAL:", file.originalname);
     console.log("ARCHIVO FÍSICO:", nombre);
@@ -150,24 +169,28 @@ const storage = multer.diskStorage({
 });
 
 const storageReportesNom = multer.diskStorage({
-  destination: (req, file, cb) => {
+  destination: function (req, file, cb) {
     console.log(
       "GUARDANDO REPORTE NOM EN:",
       reportesNomDir,
     );
 
-    cb(
-      null,
-      reportesNomDir,
-    );
+    cb(null, reportesNomDir);
   },
 
-  filename: (req, file, cb) => {
+  filename: function (req, file, cb) {
     let extension = path
-      .extname(
-        file.originalname || "",
-      )
+      .extname(file.originalname || "")
       .toLowerCase();
+
+    const esPdf =
+      file.mimetype === "application/pdf" ||
+      file.mimetype === "application/octet-stream" ||
+      extension === ".pdf";
+
+    if (esPdf) {
+      extension = ".pdf";
+    }
 
     if (!extension) {
       extension = ".pdf";
@@ -179,14 +202,16 @@ const storageReportesNom = multer.diskStorage({
       )}${extension}`;
 
     console.log(
+      "ARCHIVO ORIGINAL REPORTE NOM:",
+      file.originalname,
+    );
+
+    console.log(
       "NOMBRE FÍSICO REPORTE NOM:",
       nombreArchivo,
     );
 
-    cb(
-      null,
-      nombreArchivo,
-    );
+    cb(null, nombreArchivo);
   },
 });
 
