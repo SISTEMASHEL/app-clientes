@@ -216,20 +216,12 @@ app.post(
         tipo_documento,
       } = req.body;
 
-      // =========================================
-      // VALIDAR ARCHIVO
-      // =========================================
-
       if (!req.file) {
         return res.status(400).json({
           success: false,
           error: "No se recibió ningún archivo PDF",
         });
       }
-
-      // =========================================
-      // VALIDAR CLIENTE
-      // =========================================
 
       if (!cliente_id) {
         return res.status(400).json({
@@ -238,20 +230,12 @@ app.post(
         });
       }
 
-      // =========================================
-      // VALIDAR OPCIÓN NOM
-      // =========================================
-
       if (!opcion_nom) {
         return res.status(400).json({
           success: false,
           error: "opcion_nom es requerido",
         });
       }
-
-      // =========================================
-      // VALIDAR TIPO DOCUMENTO
-      // =========================================
 
       if (!tipo_documento) {
         return res.status(400).json({
@@ -260,11 +244,8 @@ app.post(
         });
       }
 
-      // =========================================
-      // RUTA DEL ARCHIVO
-      // =========================================
-
-      const ruta = `/uploads/reportes_nom/${req.file.filename}`;
+      const ruta =
+        `/uploads/reportes_nom/${req.file.filename}`;
 
       console.log("Archivo físico:", req.file.filename);
       console.log("Nombre original:", req.file.originalname);
@@ -273,11 +254,118 @@ app.post(
       console.log("Opción NOM:", opcion_nom);
       console.log("Tipo documento:", tipo_documento);
 
-      // =========================================
-      // GUARDAR EN POSTGRESQL
-      // =========================================
+      // =====================================================
+      // BUSCAR SI YA EXISTE UN DOCUMENTO PARA ESA COMBINACIÓN
+      // =====================================================
 
-      const result = await db.query(
+      const existente = await db.query(
+        `
+        SELECT
+          id,
+          archivo
+
+        FROM reportes_nom
+
+        WHERE cliente_id = $1
+          AND opcion_nom = $2
+          AND tipo_documento = $3
+
+        LIMIT 1
+        `,
+        [
+          cliente_id,
+          opcion_nom,
+          tipo_documento,
+        ],
+      );
+
+      let result;
+
+      // =====================================================
+      // SI YA EXISTE -> ACTUALIZAR
+      // =====================================================
+
+      if (existente.rows.length > 0) {
+        const anterior = existente.rows[0];
+
+        result = await db.query(
+          `
+          UPDATE reportes_nom
+
+          SET
+            nombre_archivo = $1,
+            archivo = $2,
+            created_at = CURRENT_TIMESTAMP
+
+          WHERE id = $3
+
+          RETURNING *
+          `,
+          [
+            req.file.originalname,
+            ruta,
+            anterior.id,
+          ],
+        );
+
+        // ===================================================
+        // BORRAR ARCHIVO ANTERIOR DEL DISK
+        // ===================================================
+
+        try {
+          if (
+            anterior.archivo &&
+            anterior.archivo.startsWith(
+              "/uploads/reportes_nom/",
+            )
+          ) {
+            const nombreAnterior =
+              path.basename(anterior.archivo);
+
+            const rutaAnterior =
+              path.join(
+                reportesNomDir,
+                nombreAnterior,
+              );
+
+            if (
+              fs.existsSync(rutaAnterior)
+            ) {
+              fs.unlinkSync(rutaAnterior);
+
+              console.log(
+                "Archivo anterior eliminado:",
+                rutaAnterior,
+              );
+            }
+          }
+        } catch (errorEliminar) {
+          console.log(
+            "No se pudo eliminar el archivo anterior:",
+            errorEliminar.message,
+          );
+        }
+
+        console.log(
+          "REPORTE NOM ACTUALIZADO:",
+          result.rows[0],
+        );
+
+        return res.json({
+          success: true,
+          mensaje:
+            "PDF actualizado correctamente",
+          reporte:
+            result.rows[0],
+          actualizado: true,
+        });
+      }
+
+      // =====================================================
+      // SI NO EXISTE -> INSERTAR
+      // =====================================================
+
+      result = await db.query(
         `
         INSERT INTO reportes_nom
         (
@@ -288,7 +376,13 @@ app.post(
           archivo
         )
         VALUES
-        ($1, $2, $3, $4, $5)
+        (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5
+        )
         RETURNING *
         `,
         [
@@ -297,37 +391,54 @@ app.post(
           tipo_documento,
           req.file.originalname,
           ruta,
-        ]
+        ],
       );
 
       console.log(
-        "Registro guardado en BD:",
-        result.rows[0]
+        "REPORTE NOM CREADO:",
+        result.rows[0],
       );
-
-      // =========================================
-      // RESPUESTA
-      // =========================================
 
       res.json({
         success: true,
-        mensaje: "PDF subido correctamente",
-        reporte: result.rows[0],
+        mensaje:
+          "PDF subido correctamente",
+        reporte:
+          result.rows[0],
+        actualizado: false,
       });
-
     } catch (error) {
-
       console.error(
         "❌ ERROR SUBIENDO REPORTE NOM:",
-        error
+        error,
       );
+
+      // ================================================
+      // SI HUBO ERROR DE BD, BORRAR EL PDF NUEVO
+      // PARA NO DEJAR ARCHIVOS HUÉRFANOS EN EL DISK
+      // ================================================
+
+      try {
+        if (req.file?.path) {
+          if (
+            fs.existsSync(req.file.path)
+          ) {
+            fs.unlinkSync(req.file.path);
+          }
+        }
+      } catch (errorEliminar) {
+        console.log(
+          "Error eliminando archivo fallido:",
+          errorEliminar.message,
+        );
+      }
 
       res.status(500).json({
         success: false,
         error: error.message,
       });
     }
-  }
+  },
 );
 
 app.get("/test-uploads", (req, res) => {
