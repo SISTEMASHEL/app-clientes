@@ -4004,6 +4004,292 @@ app.get(
   },
 );
 
+// =====================================================
+// GUARDAR INSPECCIÓN SEMANAL DE CONDICIONES DEL INMUEBLE
+// =====================================================
+
+app.post("/registros-semanales", async (req, res) => {
+  const client = await db.connect();
+
+  try {
+    const {
+      cliente_id,
+      usuario_id,
+      tipo_registro,
+      condiciones,
+    } = req.body;
+
+    console.log("========================================");
+    console.log("POST /registros-semanales");
+    console.log("BODY:", req.body);
+    console.log("========================================");
+
+    // =====================================================
+    // VALIDACIONES GENERALES
+    // =====================================================
+
+    if (!cliente_id) {
+      return res.status(400).json({
+        success: false,
+        error: "El cliente_id es obligatorio.",
+      });
+    }
+
+    if (tipo_registro !== "semanal") {
+      return res.status(400).json({
+        success: false,
+        error: "El tipo_registro debe ser semanal.",
+      });
+    }
+
+    if (!Array.isArray(condiciones) || condiciones.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Debes enviar las condiciones del inmueble.",
+      });
+    }
+
+    // =====================================================
+    // VALIDAR LAS 7 CONDICIONES ESPERADAS
+    // =====================================================
+
+    const condicionesPermitidas = [
+      "Techo",
+      "Paredes",
+      "Pisos",
+      "Rampas",
+      "Escaleras",
+      "Tuberías",
+      "Salidas de Emergencia",
+    ];
+
+    if (condiciones.length !== condicionesPermitidas.length) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "El registro semanal debe contener exactamente las 7 condiciones del inmueble.",
+      });
+    }
+
+    for (const condicion of condiciones) {
+      if (!condicion.nombre) {
+        return res.status(400).json({
+          success: false,
+          error: "Todas las condiciones deben tener nombre.",
+        });
+      }
+
+      if (!condicionesPermitidas.includes(condicion.nombre)) {
+        return res.status(400).json({
+          success: false,
+          error: `Condición no permitida: ${condicion.nombre}`,
+        });
+      }
+
+      if (
+        condicion.estado !== "bueno" &&
+        condicion.estado !== "malo"
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: `Estado inválido para ${condicion.nombre}.`,
+        });
+      }
+
+      if (condicion.estado === "malo") {
+        if (
+          !condicion.condicion ||
+          !String(condicion.condicion).trim()
+        ) {
+          return res.status(400).json({
+            success: false,
+            error: `Debes agregar la condición detectada para ${condicion.nombre}.`,
+          });
+        }
+
+        if (
+          !condicion.accion_correctiva ||
+          !String(condicion.accion_correctiva).trim()
+        ) {
+          return res.status(400).json({
+            success: false,
+            error: `Debes agregar la acción correctiva para ${condicion.nombre}.`,
+          });
+        }
+      }
+    }
+
+    // =====================================================
+    // VALIDAR QUE NO HAYA CONDICIONES DUPLICADAS
+    // =====================================================
+
+    const nombresRecibidos = condiciones.map(
+      (condicion) => condicion.nombre,
+    );
+
+    const nombresUnicos = new Set(nombresRecibidos);
+
+    if (nombresUnicos.size !== condicionesPermitidas.length) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Existen condiciones duplicadas o faltantes en el registro.",
+      });
+    }
+
+    // =====================================================
+    // CONSULTAR CLIENTE
+    // =====================================================
+
+    const clienteResult = await client.query(
+      `
+      SELECT
+        id,
+        nombre_empresa
+      FROM clientes
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [cliente_id],
+    );
+
+    if (clienteResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "El cliente no existe.",
+      });
+    }
+
+    const cliente = clienteResult.rows[0];
+
+    // =====================================================
+    // INICIAR TRANSACCIÓN
+    // =====================================================
+
+    await client.query("BEGIN");
+
+    // =====================================================
+    // GUARDAR ENCABEZADO
+    // =====================================================
+
+    const inspeccionResult = await client.query(
+      `
+      INSERT INTO inspecciones_semanales (
+        cliente_id,
+        usuario_id,
+        nombre_empresa,
+        fecha_registro,
+        hora_registro
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        CURRENT_DATE,
+        CURRENT_TIME
+      )
+      RETURNING
+        id,
+        cliente_id,
+        usuario_id,
+        nombre_empresa,
+        fecha_registro,
+        hora_registro,
+        created_at
+      `,
+      [
+        cliente_id,
+        usuario_id || null,
+        cliente.nombre_empresa,
+      ],
+    );
+
+    const inspeccion = inspeccionResult.rows[0];
+
+    // =====================================================
+    // GUARDAR DETALLE
+    // =====================================================
+
+    for (const condicion of condiciones) {
+      const condicionTexto =
+        condicion.estado === "malo"
+          ? String(condicion.condicion || "").trim()
+          : null;
+
+      const accionCorrectiva =
+        condicion.estado === "malo"
+          ? String(condicion.accion_correctiva || "").trim()
+          : null;
+
+      await client.query(
+        `
+        INSERT INTO inspecciones_semanales_detalle (
+          inspeccion_id,
+          nombre_condicion,
+          estado,
+          condicion,
+          accion_correctiva
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5
+        )
+        `,
+        [
+          inspeccion.id,
+          condicion.nombre,
+          condicion.estado,
+          condicionTexto,
+          accionCorrectiva,
+        ],
+      );
+    }
+
+    // =====================================================
+    // CONFIRMAR TRANSACCIÓN
+    // =====================================================
+
+    await client.query("COMMIT");
+
+    // =====================================================
+    // RESPUESTA
+    // =====================================================
+
+    return res.status(201).json({
+      success: true,
+      message:
+        "Registro semanal guardado correctamente.",
+      registro: inspeccion,
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.log(
+        "ERROR EN ROLLBACK:",
+        rollbackError.message,
+      );
+    }
+
+    console.log(
+      "ERROR POST /registros-semanales:",
+      error,
+    );
+
+    return res.status(500).json({
+      success: false,
+      error:
+        "Error al guardar el registro semanal.",
+      detalle: error.message,
+    });
+  } finally {
+    client.release();
+  }
+});
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
