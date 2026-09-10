@@ -20,14 +20,7 @@ const PORT = process.env.PORT || 3001;
 const corsOptions = {
   origin: "*",
 
-  methods: [
-    "GET",
-    "POST",
-    "PUT",
-    "PATCH",
-    "DELETE",
-    "OPTIONS",
-  ],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 
   allowedHeaders: [
     "Origin",
@@ -46,16 +39,9 @@ const corsOptions = {
 // =====================================================
 
 app.use((req, res, next) => {
-  console.log(
-    "REQUEST:",
-    req.method,
-    req.originalUrl,
-  );
+  console.log("REQUEST:", req.method, req.originalUrl);
 
-  res.setHeader(
-    "Access-Control-Allow-Origin",
-    "*",
-  );
+  res.setHeader("Access-Control-Allow-Origin", "*");
 
   res.setHeader(
     "Access-Control-Allow-Methods",
@@ -230,9 +216,7 @@ const storage = multer.diskStorage({
   },
 
   filename: function (req, file, cb) {
-    let extension = path
-      .extname(file.originalname || "")
-      .toLowerCase();
+    let extension = path.extname(file.originalname || "").toLowerCase();
 
     const esPdf =
       file.mimetype === "application/pdf" ||
@@ -247,10 +231,9 @@ const storage = multer.diskStorage({
       extension = "";
     }
 
-    const nombre =
-      `${Date.now()}-${Math.round(
-        Math.random() * 1e9,
-      )}${extension}`;
+    const nombre = `${Date.now()}-${Math.round(
+      Math.random() * 1e9,
+    )}${extension}`;
 
     console.log("ARCHIVO ORIGINAL:", file.originalname);
     console.log("ARCHIVO FÍSICO:", nombre);
@@ -261,18 +244,13 @@ const storage = multer.diskStorage({
 
 const storageReportesNom = multer.diskStorage({
   destination: function (req, file, cb) {
-    console.log(
-      "GUARDANDO REPORTE NOM EN:",
-      reportesNomDir,
-    );
+    console.log("GUARDANDO REPORTE NOM EN:", reportesNomDir);
 
     cb(null, reportesNomDir);
   },
 
   filename: function (req, file, cb) {
-    let extension = path
-      .extname(file.originalname || "")
-      .toLowerCase();
+    let extension = path.extname(file.originalname || "").toLowerCase();
 
     const esPdf =
       file.mimetype === "application/pdf" ||
@@ -287,20 +265,13 @@ const storageReportesNom = multer.diskStorage({
       extension = ".pdf";
     }
 
-    const nombreArchivo =
-      `${Date.now()}-${Math.round(
-        Math.random() * 1e9,
-      )}${extension}`;
+    const nombreArchivo = `${Date.now()}-${Math.round(
+      Math.random() * 1e9,
+    )}${extension}`;
 
-    console.log(
-      "ARCHIVO ORIGINAL REPORTE NOM:",
-      file.originalname,
-    );
+    console.log("ARCHIVO ORIGINAL REPORTE NOM:", file.originalname);
 
-    console.log(
-      "NOMBRE FÍSICO REPORTE NOM:",
-      nombreArchivo,
-    );
+    console.log("NOMBRE FÍSICO REPORTE NOM:", nombreArchivo);
 
     cb(null, nombreArchivo);
   },
@@ -310,59 +281,32 @@ const uploadReporteNom = multer({
   storage: storageReportesNom,
 
   fileFilter: (req, file, cb) => {
-    console.log(
-      "====================================",
-    );
+    console.log("====================================");
 
-    console.log(
-      "VALIDANDO REPORTE NOM",
-    );
+    console.log("VALIDANDO REPORTE NOM");
 
-    console.log(
-      "Nombre:",
-      file.originalname,
-    );
+    console.log("Nombre:", file.originalname);
 
-    console.log(
-      "MIME:",
-      file.mimetype,
-    );
+    console.log("MIME:", file.mimetype);
 
-    console.log(
-      "====================================",
-    );
+    console.log("====================================");
 
-    const extension = path
-      .extname(
-        file.originalname || "",
-      )
-      .toLowerCase();
+    const extension = path.extname(file.originalname || "").toLowerCase();
 
     const esPdf =
-      file.mimetype ===
-        "application/pdf" ||
-      file.mimetype ===
-        "application/octet-stream" ||
+      file.mimetype === "application/pdf" ||
+      file.mimetype === "application/octet-stream" ||
       extension === ".pdf";
 
     if (esPdf) {
-      return cb(
-        null,
-        true,
-      );
+      return cb(null, true);
     }
 
-    cb(
-      new Error(
-        "Solo se permiten archivos PDF",
-      ),
-      false,
-    );
+    cb(new Error("Solo se permiten archivos PDF"), false);
   },
 
   limits: {
-    fileSize:
-      50 * 1024 * 1024,
+    fileSize: 50 * 1024 * 1024,
   },
 });
 
@@ -398,11 +342,7 @@ app.post(
       console.log("BODY:", req.body);
       console.log("FILE:", req.file);
 
-      const {
-        cliente_id,
-        opcion_nom,
-        tipo_documento,
-      } = req.body;
+      const { cliente_id, opcion_nom, tipo_documento } = req.body;
 
       // =================================================
       // VALIDAR ARCHIVO
@@ -492,12 +432,10 @@ app.post(
       // Tabla I.1.pdf
       // =================================================
 
-      let nombreOriginalLimpio =
-        req.file.originalname || "documento.pdf";
+      let nombreOriginalLimpio = req.file.originalname || "documento.pdf";
 
       try {
-        nombreOriginalLimpio =
-          decodeURIComponent(nombreOriginalLimpio);
+        nombreOriginalLimpio = decodeURIComponent(nombreOriginalLimpio);
       } catch (errorDecode) {
         console.log(
           "No fue necesario decodificar el nombre:",
@@ -516,8 +454,7 @@ app.post(
       // https://app-clientes-sr5h.onrender.com/uploads/reportes_nom/archivo.pdf
       // =================================================
 
-      const ruta =
-        `/uploads/reportes_nom/${req.file.filename}`;
+      const ruta = `/uploads/reportes_nom/${req.file.filename}`;
 
       console.log("=================================");
       console.log("DATOS DEL ARCHIVO");
@@ -580,11 +517,7 @@ app.post(
           AND tipo_documento = $3
         LIMIT 1
         `,
-        [
-          cliente_id,
-          opcion_nom,
-          tipo_documento,
-        ],
+        [cliente_id, opcion_nom, tipo_documento],
       );
 
       // =================================================
@@ -592,8 +525,7 @@ app.post(
       // =================================================
 
       if (existente.rows.length > 0) {
-        const anterior =
-          existente.rows[0];
+        const anterior = existente.rows[0];
 
         const result = await db.query(
           `
@@ -608,11 +540,7 @@ app.post(
 
           RETURNING *
           `,
-          [
-            nombreOriginalLimpio,
-            ruta,
-            anterior.id,
-          ],
+          [nombreOriginalLimpio, ruta, anterior.id],
         );
 
         // =================================================
@@ -624,33 +552,17 @@ app.post(
         try {
           if (
             anterior.archivo &&
-            anterior.archivo.startsWith(
-              "/uploads/reportes_nom/",
-            )
+            anterior.archivo.startsWith("/uploads/reportes_nom/")
           ) {
-            const nombreAnterior =
-              path.basename(
-                anterior.archivo,
-              );
+            const nombreAnterior = path.basename(anterior.archivo);
 
-            const rutaAnterior =
-              path.join(
-                reportesNomDir,
-                nombreAnterior,
-              );
+            const rutaAnterior = path.join(reportesNomDir, nombreAnterior);
 
             // Evitar borrar el mismo archivo nuevo
-            if (
-              rutaAnterior !==
-                req.file.path &&
-              fs.existsSync(rutaAnterior)
-            ) {
+            if (rutaAnterior !== req.file.path && fs.existsSync(rutaAnterior)) {
               fs.unlinkSync(rutaAnterior);
 
-              console.log(
-                "PDF anterior eliminado del Disk:",
-                rutaAnterior,
-              );
+              console.log("PDF anterior eliminado del Disk:", rutaAnterior);
             }
           }
         } catch (errorEliminar) {
@@ -660,26 +572,16 @@ app.post(
           );
         }
 
-        console.log(
-          "=================================",
-        );
-        console.log(
-          "REPORTE NOM ACTUALIZADO",
-        );
-        console.log(
-          result.rows[0],
-        );
-        console.log(
-          "=================================",
-        );
+        console.log("=================================");
+        console.log("REPORTE NOM ACTUALIZADO");
+        console.log(result.rows[0]);
+        console.log("=================================");
 
         return res.json({
           success: true,
-          mensaje:
-            "PDF actualizado correctamente",
+          mensaje: "PDF actualizado correctamente",
           actualizado: true,
-          reporte:
-            result.rows[0],
+          reporte: result.rows[0],
         });
       }
 
@@ -707,50 +609,26 @@ app.post(
         )
         RETURNING *
         `,
-        [
-          cliente_id,
-          opcion_nom,
-          tipo_documento,
-          nombreOriginalLimpio,
-          ruta,
-        ],
+        [cliente_id, opcion_nom, tipo_documento, nombreOriginalLimpio, ruta],
       );
 
-      console.log(
-        "=================================",
-      );
-      console.log(
-        "NUEVO REPORTE NOM GUARDADO",
-      );
-      console.log(
-        result.rows[0],
-      );
-      console.log(
-        "=================================",
-      );
+      console.log("=================================");
+      console.log("NUEVO REPORTE NOM GUARDADO");
+      console.log(result.rows[0]);
+      console.log("=================================");
 
       res.json({
         success: true,
-        mensaje:
-          "PDF subido correctamente",
+        mensaje: "PDF subido correctamente",
         actualizado: false,
-        reporte:
-          result.rows[0],
+        reporte: result.rows[0],
       });
-
     } catch (error) {
-      console.error(
-        "=================================",
-      );
+      console.error("=================================");
 
-      console.error(
-        "❌ ERROR SUBIENDO REPORTE NOM:",
-        error,
-      );
+      console.error("❌ ERROR SUBIENDO REPORTE NOM:", error);
 
-      console.error(
-        "=================================",
-      );
+      console.error("=================================");
 
       // =================================================
       // SI FALLÓ POSTGRESQL
@@ -758,24 +636,13 @@ app.post(
       // =================================================
 
       try {
-        if (
-          req.file?.path &&
-          fs.existsSync(req.file.path)
-        ) {
-          fs.unlinkSync(
-            req.file.path,
-          );
+        if (req.file?.path && fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
 
-          console.log(
-            "PDF nuevo eliminado por error:",
-            req.file.path,
-          );
+          console.log("PDF nuevo eliminado por error:", req.file.path);
         }
       } catch (errorEliminar) {
-        console.log(
-          "No se pudo eliminar PDF fallido:",
-          errorEliminar.message,
-        );
+        console.log("No se pudo eliminar PDF fallido:", errorEliminar.message);
       }
 
       res.status(500).json({
@@ -919,11 +786,8 @@ app.get("/clientes/:usuarioId", async (req, res) => {
     // USUARIO NORMAL
     // SOLO SUS CLIENTES
     // =================================================
-
     else {
-      console.log(
-        "USUARIO NORMAL - MOSTRANDO SOLO SUS CLIENTES",
-      );
+      console.log("USUARIO NORMAL - MOSTRANDO SOLO SUS CLIENTES");
 
       result = await db.query(
         `
@@ -943,17 +807,11 @@ app.get("/clientes/:usuarioId", async (req, res) => {
       );
     }
 
-    console.log(
-      "CLIENTES ENCONTRADOS:",
-      result.rows.length,
-    );
+    console.log("CLIENTES ENCONTRADOS:", result.rows.length);
 
     res.json(result.rows);
   } catch (error) {
-    console.error(
-      "ERROR OBTENIENDO CLIENTES:",
-      error,
-    );
+    console.error("ERROR OBTENIENDO CLIENTES:", error);
 
     res.status(500).json({
       error: "Error al obtener clientes",
@@ -1291,11 +1149,7 @@ app.post("/documentos", upload.single("archivo"), async (req, res) => {
   console.log("====================================");
 
   try {
-    const {
-      cuestionario_info_id,
-      puesto_id,
-      tipo,
-    } = req.body;
+    const { cuestionario_info_id, puesto_id, tipo } = req.body;
 
     if (!req.file) {
       return res.status(400).json({
@@ -1322,13 +1176,11 @@ app.post("/documentos", upload.single("archivo"), async (req, res) => {
     if (!cuestionario_info_id && !puesto_id) {
       return res.status(400).json({
         success: false,
-        error:
-          "Se requiere cuestionario_info_id o puesto_id",
+        error: "Se requiere cuestionario_info_id o puesto_id",
       });
     }
 
-    const ruta =
-      `/uploads/${req.file.filename}`;
+    const ruta = `/uploads/${req.file.filename}`;
 
     console.log("Ruta BD:", ruta);
 
@@ -1415,7 +1267,6 @@ app.post("/documentos", upload.single("archivo"), async (req, res) => {
       // -------------------------------------------------
       // SI NO EXISTE → INSERTAR
       // -------------------------------------------------
-
       else {
         result = await db.query(
           `
@@ -1435,11 +1286,7 @@ app.post("/documentos", upload.single("archivo"), async (req, res) => {
           )
           RETURNING *
           `,
-          [
-            puesto_id,
-            tipo,
-            ruta,
-          ],
+          [puesto_id, tipo, ruta],
         );
       }
 
@@ -1476,11 +1323,7 @@ app.post("/documentos", upload.single("archivo"), async (req, res) => {
       )
       RETURNING *
       `,
-      [
-        cuestionario_info_id,
-        tipo,
-        ruta,
-      ],
+      [cuestionario_info_id, tipo, ruta],
     );
 
     res.json({
@@ -1488,10 +1331,7 @@ app.post("/documentos", upload.single("archivo"), async (req, res) => {
       documento: result.rows[0],
     });
   } catch (error) {
-    console.error(
-      "ERROR SUBIENDO DOCUMENTO:",
-      error,
-    );
+    console.error("ERROR SUBIENDO DOCUMENTO:", error);
 
     res.status(500).json({
       success: false,
@@ -1500,12 +1340,10 @@ app.post("/documentos", upload.single("archivo"), async (req, res) => {
   }
 });
 
-app.get(
-  "/documentos-puesto/:puestoId",
-  async (req, res) => {
-    try {
-      const result = await db.query(
-        `
+app.get("/documentos-puesto/:puestoId", async (req, res) => {
+  try {
+    const result = await db.query(
+      `
         SELECT
           id,
           cuestionario_info_id,
@@ -1521,20 +1359,18 @@ app.get(
 
         ORDER BY created_at DESC
         `,
-        [req.params.puestoId],
-      );
+      [req.params.puestoId],
+    );
 
-      res.json(result.rows);
-    } catch (error) {
-      console.error(error);
+    res.json(result.rows);
+  } catch (error) {
+    console.error(error);
 
-      res.status(500).json({
-        error:
-          "No fue posible obtener los documentos del puesto.",
-      });
-    }
-  },
-);
+    res.status(500).json({
+      error: "No fue posible obtener los documentos del puesto.",
+    });
+  }
+});
 
 // PREGUNTAS POR SUBOPCIÓN
 app.get("/preguntas/:subopcion_tipo", async (req, res) => {
@@ -1892,48 +1728,26 @@ app.get("/reporte-consolidado", async (req, res) => {
         q.id;
     `;
 
-    const { rows } = await db.query(
-      sql,
-      [puestoId],
-    );
+    const { rows } = await db.query(sql, [puestoId]);
 
-    console.log(
-      "====================================",
-    );
+    console.log("====================================");
 
-    console.log(
-      "REPORTE CONSOLIDADO",
-    );
+    console.log("REPORTE CONSOLIDADO");
 
-    console.log(
-      "PUESTO:",
-      puestoId,
-    );
+    console.log("PUESTO:", puestoId);
 
-    console.log(
-      "REGISTROS:",
-      rows.length,
-    );
+    console.log("REGISTROS:", rows.length);
 
-    console.log(
-      "====================================",
-    );
+    console.log("====================================");
 
     res.json(rows);
-
   } catch (error) {
-
-    console.error(
-      "❌ Error reporte consolidado:",
-      error,
-    );
+    console.error("❌ Error reporte consolidado:", error);
 
     res.status(500).json({
-      message:
-        "Error interno en reporte consolidado",
+      message: "Error interno en reporte consolidado",
 
-      error:
-        error.message,
+      error: error.message,
     });
   }
 });
@@ -1957,86 +1771,49 @@ app.get("/reporte-consolidado", async (req, res) => {
 // ======================================================
 
 app.delete("/clientes/:id", async (req, res) => {
-
-  const clienteId =
-    parseInt(
-      req.params.id,
-      10,
-    );
-
+  const clienteId = parseInt(req.params.id, 10);
 
   if (!clienteId) {
-
     return res.status(400).json({
       success: false,
-      message:
-        "ID de cliente inválido",
+      message: "ID de cliente inválido",
     });
   }
 
-
-  const client =
-    await db.connect();
-
+  const client = await db.connect();
 
   try {
+    console.log("====================================");
 
-    console.log(
-      "====================================",
-    );
+    console.log("ELIMINANDO CLIENTE COMPLETO");
 
-    console.log(
-      "ELIMINANDO CLIENTE COMPLETO",
-    );
+    console.log("CLIENTE ID:", clienteId);
 
-    console.log(
-      "CLIENTE ID:",
-      clienteId,
-    );
+    console.log("====================================");
 
-    console.log(
-      "====================================",
-    );
-
-
-    await client.query(
-      "BEGIN",
-    );
-
+    await client.query("BEGIN");
 
     // ==================================================
     // 1. VERIFICAR QUE EL CLIENTE EXISTA
     // ==================================================
 
-    const clienteExiste =
-      await client.query(
-        `
+    const clienteExiste = await client.query(
+      `
         SELECT id
         FROM clientes
         WHERE id = $1
         `,
-        [
-          clienteId,
-        ],
-      );
+      [clienteId],
+    );
 
-
-    if (
-      clienteExiste.rows.length === 0
-    ) {
-
-      await client.query(
-        "ROLLBACK",
-      );
-
+    if (clienteExiste.rows.length === 0) {
+      await client.query("ROLLBACK");
 
       return res.status(404).json({
         success: false,
-        message:
-          "El cliente no existe",
+        message: "El cliente no existe",
       });
     }
-
 
     // ==================================================
     // 2. ELIMINAR INVENTARIO
@@ -2047,11 +1824,8 @@ app.delete("/clientes/:id", async (req, res) => {
       DELETE FROM inventario
       WHERE cliente_id = $1
       `,
-      [
-        clienteId,
-      ],
+      [clienteId],
     );
-
 
     // ==================================================
     // 3. ELIMINAR REPORTES NOM DEL CLIENTE
@@ -2062,65 +1836,45 @@ app.delete("/clientes/:id", async (req, res) => {
       DELETE FROM reportes_nom
       WHERE cliente_id = $1
       `,
-      [
-        clienteId,
-      ],
+      [clienteId],
     );
-
 
     // ==================================================
     // 4. OBTENER ÁREAS DEL CLIENTE
     // ==================================================
 
-    const areas =
-      await client.query(
-        `
+    const areas = await client.query(
+      `
         SELECT id
         FROM areas_trabajo
         WHERE cliente_id = $1
         `,
-        [
-          clienteId,
-        ],
-      );
-
+      [clienteId],
+    );
 
     // ==================================================
     // RECORRER ÁREAS
     // ==================================================
 
-    for (
-      const area
-      of areas.rows
-    ) {
-
+    for (const area of areas.rows) {
       // ================================================
       // 5. OBTENER PUESTOS
       // ================================================
 
-      const puestos =
-        await client.query(
-          `
+      const puestos = await client.query(
+        `
           SELECT id
           FROM puestos_trabajo
           WHERE area_id = $1
           `,
-          [
-            area.id,
-          ],
-        );
-
+        [area.id],
+      );
 
       // ================================================
       // RECORRER PUESTOS
       // ================================================
 
-      for (
-        const puesto
-        of puestos.rows
-      ) {
-
-
+      for (const puesto of puestos.rows) {
         // ==============================================
         // 6. DOCUMENTOS NUEVOS
         // LIGADOS DIRECTAMENTE AL PUESTO
@@ -2131,11 +1885,8 @@ app.delete("/clientes/:id", async (req, res) => {
           DELETE FROM documentos_cuestionario
           WHERE puesto_id = $1
           `,
-          [
-            puesto.id,
-          ],
+          [puesto.id],
         );
-
 
         // ==============================================
         // 7. RELACIONES DE RIESGOS
@@ -2146,11 +1897,8 @@ app.delete("/clientes/:id", async (req, res) => {
           DELETE FROM puestos_riesgos
           WHERE puesto_id = $1
           `,
-          [
-            puesto.id,
-          ],
+          [puesto.id],
         );
-
 
         // ==============================================
         // 8. RELACIONES DE EPP
@@ -2161,11 +1909,8 @@ app.delete("/clientes/:id", async (req, res) => {
           DELETE FROM puestos_epp
           WHERE puesto_id = $1
           `,
-          [
-            puesto.id,
-          ],
+          [puesto.id],
         );
-
 
         // ==============================================
         // 9. RELACIONES DE NORMAS
@@ -2176,39 +1921,27 @@ app.delete("/clientes/:id", async (req, res) => {
           DELETE FROM puestos_normas
           WHERE puesto_id = $1
           `,
-          [
-            puesto.id,
-          ],
+          [puesto.id],
         );
-
 
         // ==============================================
         // 10. OBTENER cuestionarios_info
         // ==============================================
 
-        const infos =
-          await client.query(
-            `
+        const infos = await client.query(
+          `
             SELECT id
             FROM cuestionarios_info
             WHERE puesto_id = $1
             `,
-            [
-              puesto.id,
-            ],
-          );
-
+          [puesto.id],
+        );
 
         // ==============================================
         // RECORRER INFORMACIÓN DE CUESTIONARIOS
         // ==============================================
 
-        for (
-          const info
-          of infos.rows
-        ) {
-
-
+        for (const info of infos.rows) {
           // ============================================
           // 11. ELIMINAR RESPUESTAS
           // ============================================
@@ -2218,11 +1951,8 @@ app.delete("/clientes/:id", async (req, res) => {
             DELETE FROM cuestionarios
             WHERE info_id = $1
             `,
-            [
-              info.id,
-            ],
+            [info.id],
           );
-
 
           // ============================================
           // 12. DOCUMENTOS ANTIGUOS
@@ -2234,12 +1964,9 @@ app.delete("/clientes/:id", async (req, res) => {
             DELETE FROM documentos_cuestionario
             WHERE cuestionario_info_id = $1
             `,
-            [
-              info.id,
-            ],
+            [info.id],
           );
         }
-
 
         // ==============================================
         // 13. ELIMINAR cuestionarios_info
@@ -2250,11 +1977,8 @@ app.delete("/clientes/:id", async (req, res) => {
           DELETE FROM cuestionarios_info
           WHERE puesto_id = $1
           `,
-          [
-            puesto.id,
-          ],
+          [puesto.id],
         );
-
 
         // ==============================================
         // 14. ELIMINAR PUESTO
@@ -2265,12 +1989,9 @@ app.delete("/clientes/:id", async (req, res) => {
           DELETE FROM puestos_trabajo
           WHERE id = $1
           `,
-          [
-            puesto.id,
-          ],
+          [puesto.id],
         );
       }
-
 
       // =================================================
       // 15. ELIMINAR ÁREA
@@ -2281,12 +2002,9 @@ app.delete("/clientes/:id", async (req, res) => {
         DELETE FROM areas_trabajo
         WHERE id = $1
         `,
-        [
-          area.id,
-        ],
+        [area.id],
       );
     }
-
 
     // ==================================================
     // 16. ELIMINAR CLIENTE
@@ -2297,89 +2015,52 @@ app.delete("/clientes/:id", async (req, res) => {
       DELETE FROM clientes
       WHERE id = $1
       `,
-      [
-        clienteId,
-      ],
+      [clienteId],
     );
-
 
     // ==================================================
     // 17. CONFIRMAR TRANSACCIÓN
     // ==================================================
 
-    await client.query(
-      "COMMIT",
-    );
+    await client.query("COMMIT");
 
+    console.log("====================================");
 
-    console.log(
-      "====================================",
-    );
+    console.log("CLIENTE ELIMINADO CORRECTAMENTE");
 
-    console.log(
-      "CLIENTE ELIMINADO CORRECTAMENTE",
-    );
+    console.log("CLIENTE ID:", clienteId);
 
-    console.log(
-      "CLIENTE ID:",
-      clienteId,
-    );
-
-    console.log(
-      "====================================",
-    );
-
+    console.log("====================================");
 
     res.json({
       success: true,
-      message:
-        "Cliente eliminado correctamente",
+      message: "Cliente eliminado correctamente",
     });
-
   } catch (error) {
-
     // ==================================================
     // ERROR → DESHACER TODO
     // ==================================================
 
-    await client.query(
-      "ROLLBACK",
-    );
+    await client.query("ROLLBACK");
 
+    console.error("====================================");
 
-    console.error(
-      "====================================",
-    );
+    console.error("ERROR ELIMINANDO CLIENTE:", error);
 
-    console.error(
-      "ERROR ELIMINANDO CLIENTE:",
-      error,
-    );
-
-    console.error(
-      "====================================",
-    );
-
+    console.error("====================================");
 
     res.status(500).json({
-
       success: false,
 
-      message:
-        error.message,
+      message: error.message,
 
-      detail:
-        error.detail,
+      detail: error.detail,
 
-      table:
-        error.table,
+      table: error.table,
 
-      constraint:
-        error.constraint,
+      constraint: error.constraint,
     });
-
   } finally {
-
     client.release();
   }
 });
@@ -2395,13 +2076,13 @@ app.post(
   async (req, res) => {
     try {
       console.log("=================================");
-console.log("📦 BODY INVENTARIO:");
-console.log(req.body);
+      console.log("📦 BODY INVENTARIO:");
+      console.log(req.body);
 
-console.log("📄 FILES INVENTARIO:");
-console.log(req.files);
+      console.log("📄 FILES INVENTARIO:");
+      console.log(req.files);
 
-console.log("=================================");
+      console.log("=================================");
       const {
         clave_producto,
         nombre_producto,
@@ -2568,64 +2249,47 @@ app.put("/inventario/:id", async (req, res) => {
   }
 });
 
-app.post("/validar-password", async(req,res)=>{
+app.post("/validar-password", async (req, res) => {
+  try {
+    const { usuario_id, password } = req.body;
 
- try{
-
- const {usuario_id,password}=req.body;
-
-
- const usuario = await db.query(
- `
+    const usuario = await db.query(
+      `
  SELECT password
  FROM usuarios
  WHERE id=$1
  `,
- [usuario_id]
- );
+      [usuario_id],
+    );
 
+    if (usuario.rows.length === 0) {
+      return res.json({
+        valido: false,
+      });
+    }
 
- if(usuario.rows.length===0){
+    if (usuario.rows[0].password === password) {
+      return res.json({
+        valido: true,
+      });
+    }
 
-   return res.json({
-    valido:false
-   });
+    res.json({
+      valido: false,
+    });
+  } catch (error) {
+    console.log(error);
 
- }
-
-
- if(usuario.rows[0].password === password){
-
-   return res.json({
-    valido:true
-   });
-
- }
-
-
- res.json({
-   valido:false
- });
-
-
- }catch(error){
-
- console.log(error);
-
- res.status(500).json({
-  error:error.message
- });
-
- }
-
+    res.status(500).json({
+      error: error.message,
+    });
+  }
 });
 
 app.get("/reportes/puestos/:clienteId", async (req, res) => {
-
   const { clienteId } = req.params;
 
   try {
-
     const resultado = await db.query(
       `
       SELECT 
@@ -2685,31 +2349,23 @@ app.get("/reportes/puestos/:clienteId", async (req, res) => {
         p.puesto
 
       `,
-      [clienteId]
+      [clienteId],
     );
 
-
     res.json(resultado.rows);
-
-
-  } catch(error){
-
+  } catch (error) {
     console.log("ERROR REPORTES PUESTOS:", error.message);
 
     res.status(500).json({
-      error:error.message
+      error: error.message,
     });
-
   }
-
 });
 
 app.get("/reportes/areas/:clienteId", async (req, res) => {
-
   const { clienteId } = req.params;
 
   try {
-
     const resultado = await db.query(
       `
       SELECT
@@ -2727,23 +2383,17 @@ app.get("/reportes/areas/:clienteId", async (req, res) => {
       ORDER BY a.nombre_area
 
       `,
-      [clienteId]
+      [clienteId],
     );
 
-
     res.json(resultado.rows);
-
-
-  } catch(error){
-
+  } catch (error) {
     console.log(error);
 
     res.status(500).json({
-      error:"Error obteniendo áreas del cliente"
+      error: "Error obteniendo áreas del cliente",
     });
-
   }
-
 });
 
 // =====================================================
@@ -2768,7 +2418,7 @@ app.get("/reportes-nom/:clienteId", async (req, res) => {
       WHERE cliente_id = $1
       ORDER BY opcion_nom ASC, id ASC
       `,
-      [clienteId]
+      [clienteId],
     );
 
     res.json(resultado.rows);
@@ -2793,37 +2443,20 @@ app.get("/reportes-nom/:clienteId", async (req, res) => {
 // 2. Documentos antiguos ligados al cuestionario
 // ======================================================
 
-app.get(
-  "/documentos-nom-cliente/:clienteId",
-  async (req, res) => {
+app.get("/documentos-nom-cliente/:clienteId", async (req, res) => {
+  try {
+    const { clienteId } = req.params;
 
-    try {
+    console.log("====================================");
 
-      const {
-        clienteId,
-      } = req.params;
+    console.log("CONSULTANDO DOCUMENTOS ARP / FICHA");
 
+    console.log("CLIENTE:", clienteId);
 
-      console.log(
-        "====================================",
-      );
+    console.log("====================================");
 
-      console.log(
-        "CONSULTANDO DOCUMENTOS ARP / FICHA",
-      );
-
-      console.log(
-        "CLIENTE:",
-        clienteId,
-      );
-
-      console.log(
-        "====================================",
-      );
-
-
-      const result = await db.query(
-        `
+    const result = await db.query(
+      `
         SELECT
 
           /* =====================================
@@ -2980,37 +2613,20 @@ app.get(
           dc.id DESC
         `,
 
-        [
-          clienteId,
-        ],
-      );
+      [clienteId],
+    );
 
+    console.log("DOCUMENTOS ARP/FICHA ENCONTRADOS:", result.rows.length);
 
-      console.log(
-        "DOCUMENTOS ARP/FICHA ENCONTRADOS:",
-        result.rows.length,
-      );
+    res.json(result.rows);
+  } catch (error) {
+    console.error("ERROR OBTENIENDO ARP/FICHA:", error);
 
-
-      res.json(
-        result.rows,
-      );
-
-    } catch (error) {
-
-      console.error(
-        "ERROR OBTENIENDO ARP/FICHA:",
-        error,
-      );
-
-
-      res.status(500).json({
-        error:
-          "No fue posible obtener los documentos ARP y FICHA.",
-      });
-    }
-  },
-);
+    res.status(500).json({
+      error: "No fue posible obtener los documentos ARP y FICHA.",
+    });
+  }
+});
 
 // ======================================================
 // OBTENER TODAS LAS FICHAS TÉCNICAS Y CERTIFICADOS EPP
@@ -3069,17 +2685,11 @@ app.get("/documentos-epp-cliente/:clienteId", async (req, res) => {
       [clienteId],
     );
 
-    console.log(
-      "DOCUMENTOS EPP ENCONTRADOS:",
-      result.rows.length,
-    );
+    console.log("DOCUMENTOS EPP ENCONTRADOS:", result.rows.length);
 
     res.json(result.rows);
   } catch (error) {
-    console.error(
-      "ERROR OBTENIENDO DOCUMENTOS EPP:",
-      error,
-    );
+    console.error("ERROR OBTENIENDO DOCUMENTOS EPP:", error);
 
     res.status(500).json({
       error:
@@ -3147,13 +2757,10 @@ const construirSnapshotEpp = async (clienteId) => {
   );
 
   if (clienteResult.rows.length === 0) {
-    throw new Error(
-      "El cliente indicado no existe",
-    );
+    throw new Error("El cliente indicado no existe");
   }
 
-  const cliente =
-    clienteResult.rows[0];
+  const cliente = clienteResult.rows[0];
 
   // ===================================================
   // 2. ÁREAS
@@ -3246,36 +2853,23 @@ const construirSnapshotEpp = async (clienteId) => {
     [clienteId],
   );
 
-  const areas =
-    areasResult.rows;
+  const areas = areasResult.rows;
 
-  const puestos =
-    puestosResult.rows;
+  const puestos = puestosResult.rows;
 
-  const inventario =
-    inventarioResult.rows;
+  const inventario = inventarioResult.rows;
 
   // ===================================================
   // 5. CLAVE ÚNICA PARA COMPARACIÓN
   // ===================================================
 
-  const obtenerClaveEpp = (
-    producto,
-  ) => {
+  const obtenerClaveEpp = (producto) => {
     if (
-      producto.clave_producto !==
-        null &&
-      producto.clave_producto !==
-        undefined &&
-      String(
-        producto.clave_producto,
-      ).trim() !== ""
+      producto.clave_producto !== null &&
+      producto.clave_producto !== undefined &&
+      String(producto.clave_producto).trim() !== ""
     ) {
-      return String(
-        producto.clave_producto,
-      )
-        .trim()
-        .toLowerCase();
+      return String(producto.clave_producto).trim().toLowerCase();
     }
 
     return `${producto.nombre_producto || ""}|${producto.marca || ""}`
@@ -3287,89 +2881,53 @@ const construirSnapshotEpp = async (clienteId) => {
   // 6. CREAR ESTRUCTURA DE ÁREAS Y PUESTOS
   // ===================================================
 
-  const areasProcesadas =
-    areas.map((area) => {
-      const puestosArea =
-        puestos
-          .filter(
-            (puesto) =>
-              Number(
-                puesto.area_id,
-              ) ===
-              Number(
-                area.id,
-              ),
-          )
-          .map((puesto) => {
-            const productos =
-              inventario.filter(
-                (producto) =>
-                  Number(
-                    producto.puesto_id,
-                  ) ===
-                  Number(
-                    puesto.id,
-                  ),
-              );
+  const areasProcesadas = areas.map((area) => {
+    const puestosArea = puestos
+      .filter((puesto) => Number(puesto.area_id) === Number(area.id))
+      .map((puesto) => {
+        const productos = inventario.filter(
+          (producto) => Number(producto.puesto_id) === Number(puesto.id),
+        );
 
-            return {
-              puesto_id:
-                puesto.id,
+        return {
+          puesto_id: puesto.id,
 
-              puesto:
-                puesto.puesto,
+          puesto: puesto.puesto,
 
-              numero_usuarios:
-                puesto.numero_usuarios,
+          numero_usuarios: puesto.numero_usuarios,
 
-              descripcion:
-                puesto.descripcion,
+          descripcion: puesto.descripcion,
 
-              epp:
-                productos.map(
-                  (producto) => ({
-                    id:
-                      producto.id,
+          epp: productos.map((producto) => ({
+            id: producto.id,
 
-                    clave_producto:
-                      producto.clave_producto,
+            clave_producto: producto.clave_producto,
 
-                    nombre_producto:
-                      producto.nombre_producto,
+            nombre_producto: producto.nombre_producto,
 
-                    marca:
-                      producto.marca,
+            marca: producto.marca,
 
-                    descripcion:
-                      producto.descripcion,
+            descripcion: producto.descripcion,
 
-                    cantidad_total:
-                      producto.cantidad_total,
+            cantidad_total: producto.cantidad_total,
 
-                    ficha_tecnica:
-                      producto.ficha_tecnica,
+            ficha_tecnica: producto.ficha_tecnica,
 
-                    certificado:
-                      producto.certificado,
-                  }),
-                ),
-            };
-          });
+            certificado: producto.certificado,
+          })),
+        };
+      });
 
-      return {
-        area_id:
-          area.id,
+    return {
+      area_id: area.id,
 
-        nombre_area:
-          area.nombre_area,
+      nombre_area: area.nombre_area,
 
-        descripcion:
-          area.descripcion,
+      descripcion: area.descripcion,
 
-        puestos:
-          puestosArea,
-      };
-    });
+      puestos: puestosArea,
+    };
+  });
 
   // ===================================================
   // 7. TODOS LOS PUESTOS DEL CLIENTE
@@ -3380,119 +2938,74 @@ const construirSnapshotEpp = async (clienteId) => {
 
   const puestosGlobales = [];
 
-  areasProcesadas.forEach(
-    (area) => {
-      area.puestos.forEach(
-        (puesto) => {
-          puestosGlobales.push({
-            area_id:
-              area.area_id,
+  areasProcesadas.forEach((area) => {
+    area.puestos.forEach((puesto) => {
+      puestosGlobales.push({
+        area_id: area.area_id,
 
-            nombre_area:
-              area.nombre_area,
+        nombre_area: area.nombre_area,
 
-            puesto_id:
-              puesto.puesto_id,
+        puesto_id: puesto.puesto_id,
 
-            puesto:
-              puesto.puesto,
+        puesto: puesto.puesto,
 
-            epp:
-              puesto.epp,
-          });
-        },
-      );
-    },
-  );
+        epp: puesto.epp,
+      });
+    });
+  });
 
   // ===================================================
   // 8. MAPA GLOBAL DE TODOS LOS EPP
   // ===================================================
 
-  const mapaGlobal =
-    new Map();
+  const mapaGlobal = new Map();
 
-  inventario.forEach(
-    (producto) => {
-      const clave =
-        obtenerClaveEpp(
-          producto,
-        );
+  inventario.forEach((producto) => {
+    const clave = obtenerClaveEpp(producto);
 
-      if (
-        !mapaGlobal.has(
-          clave,
-        )
-      ) {
-        mapaGlobal.set(
-          clave,
-          {
-            clave_comparacion:
-              clave,
+    if (!mapaGlobal.has(clave)) {
+      mapaGlobal.set(clave, {
+        clave_comparacion: clave,
 
-            clave_producto:
-              producto.clave_producto,
+        clave_producto: producto.clave_producto,
 
-            nombre_producto:
-              producto.nombre_producto,
+        nombre_producto: producto.nombre_producto,
 
-            marca:
-              producto.marca,
+        marca: producto.marca,
 
-            ubicaciones: [],
-          },
-        );
-      }
+        ubicaciones: [],
+      });
+    }
 
-      const registro =
-        mapaGlobal.get(
-          clave,
-        );
+    const registro = mapaGlobal.get(clave);
 
-      // Evitar duplicar exactamente
-      // área + puesto para el mismo EPP.
+    // Evitar duplicar exactamente
+    // área + puesto para el mismo EPP.
 
-      const yaExiste =
-        registro.ubicaciones.some(
-          (ubicacion) =>
-            Number(
-              ubicacion.area_id,
-            ) ===
-              Number(
-                producto.area_id,
-              ) &&
-            Number(
-              ubicacion.puesto_id,
-            ) ===
-              Number(
-                producto.puesto_id,
-              ),
-        );
+    const yaExiste = registro.ubicaciones.some(
+      (ubicacion) =>
+        Number(ubicacion.area_id) === Number(producto.area_id) &&
+        Number(ubicacion.puesto_id) === Number(producto.puesto_id),
+    );
 
-      if (!yaExiste) {
-        registro.ubicaciones.push({
-          area_id:
-            producto.area_id,
+    if (!yaExiste) {
+      registro.ubicaciones.push({
+        area_id: producto.area_id,
 
-          nombre_area:
-            producto.nombre_area,
+        nombre_area: producto.nombre_area,
 
-          puesto_id:
-            producto.puesto_id,
+        puesto_id: producto.puesto_id,
 
-          puesto:
-            producto.puesto_nombre,
-        });
-      }
-    },
-  );
+        puesto: producto.puesto_nombre,
+      });
+    }
+  });
 
   // ===================================================
   // 9. TOTAL DE PUESTOS A COMPARAR
   // ===================================================
 
-  const totalPuestos =
-    puestosGlobales.length;
+  const totalPuestos = puestosGlobales.length;
 
   // ===================================================
   // 10. EPP IDÉNTICOS
@@ -3510,65 +3023,44 @@ const construirSnapshotEpp = async (clienteId) => {
 
   const eppDiferentes = [];
 
-  mapaGlobal.forEach(
-    (producto) => {
-      const puestosConProducto =
-        new Set(
-          producto.ubicaciones.map(
-            (ubicacion) =>
-              String(
-                ubicacion.puesto_id,
-              ),
-          ),
-        );
+  mapaGlobal.forEach((producto) => {
+    const puestosConProducto = new Set(
+      producto.ubicaciones.map((ubicacion) => String(ubicacion.puesto_id)),
+    );
 
-      // ===============================================
-      // IDÉNTICO
-      // Está presente en TODOS los puestos
-      // ===============================================
+    // ===============================================
+    // IDÉNTICO
+    // Está presente en TODOS los puestos
+    // ===============================================
 
-      if (
-        totalPuestos > 0 &&
-        puestosConProducto.size ===
-          totalPuestos
-      ) {
-        eppIdenticos.push({
-          clave_producto:
-            producto.clave_producto,
+    if (totalPuestos > 0 && puestosConProducto.size === totalPuestos) {
+      eppIdenticos.push({
+        clave_producto: producto.clave_producto,
 
-          nombre_producto:
-            producto.nombre_producto,
+        nombre_producto: producto.nombre_producto,
 
-          marca:
-            producto.marca,
+        marca: producto.marca,
 
-          ubicaciones:
-            producto.ubicaciones,
-        });
-      }
+        ubicaciones: producto.ubicaciones,
+      });
+    }
 
-      // ===============================================
-      // DIFERENTE
-      // Solo está presente en algunos puestos
-      // ===============================================
+    // ===============================================
+    // DIFERENTE
+    // Solo está presente en algunos puestos
+    // ===============================================
+    else {
+      eppDiferentes.push({
+        clave_producto: producto.clave_producto,
 
-      else {
-        eppDiferentes.push({
-          clave_producto:
-            producto.clave_producto,
+        nombre_producto: producto.nombre_producto,
 
-          nombre_producto:
-            producto.nombre_producto,
+        marca: producto.marca,
 
-          marca:
-            producto.marca,
-
-          ubicaciones:
-            producto.ubicaciones,
-        });
-      }
-    },
-  );
+        ubicaciones: producto.ubicaciones,
+      });
+    }
+  });
 
   // ===================================================
   // 12. MATRIZ COMPLETA
@@ -3577,58 +3069,35 @@ const construirSnapshotEpp = async (clienteId) => {
   // columnas por área / puesto.
   // ===================================================
 
-  const matrizComparacion =
-    Array.from(
-      mapaGlobal.values(),
-    ).map(
-      (producto) => {
-        const presencia =
-          puestosGlobales.map(
-            (puesto) => {
-              const existe =
-                producto.ubicaciones.some(
-                  (ubicacion) =>
-                    Number(
-                      ubicacion.puesto_id,
-                    ) ===
-                    Number(
-                      puesto.puesto_id,
-                    ),
-                );
+  const matrizComparacion = Array.from(mapaGlobal.values()).map((producto) => {
+    const presencia = puestosGlobales.map((puesto) => {
+      const existe = producto.ubicaciones.some(
+        (ubicacion) => Number(ubicacion.puesto_id) === Number(puesto.puesto_id),
+      );
 
-              return {
-                area_id:
-                  puesto.area_id,
+      return {
+        area_id: puesto.area_id,
 
-                nombre_area:
-                  puesto.nombre_area,
+        nombre_area: puesto.nombre_area,
 
-                puesto_id:
-                  puesto.puesto_id,
+        puesto_id: puesto.puesto_id,
 
-                puesto:
-                  puesto.puesto,
+        puesto: puesto.puesto,
 
-                tiene_epp:
-                  existe,
-              };
-            },
-          );
+        tiene_epp: existe,
+      };
+    });
 
-        return {
-          clave_producto:
-            producto.clave_producto,
+    return {
+      clave_producto: producto.clave_producto,
 
-          nombre_producto:
-            producto.nombre_producto,
+      nombre_producto: producto.nombre_producto,
 
-          marca:
-            producto.marca,
+      marca: producto.marca,
 
-          presencia,
-        };
-      },
-    );
+      presencia,
+    };
+  });
 
   // ===================================================
   // 13. RESULTADO FINAL
@@ -3636,31 +3105,23 @@ const construirSnapshotEpp = async (clienteId) => {
 
   return {
     cliente: {
-      id:
-        cliente.id,
+      id: cliente.id,
 
-      nombre_empresa:
-        cliente.nombre_empresa,
+      nombre_empresa: cliente.nombre_empresa,
     },
 
-    areas:
-      areasProcesadas,
+    areas: areasProcesadas,
 
     comparacion: {
-      total_areas:
-        areasProcesadas.length,
+      total_areas: areasProcesadas.length,
 
-      total_puestos:
-        totalPuestos,
+      total_puestos: totalPuestos,
 
-      epp_identicos:
-        eppIdenticos,
+      epp_identicos: eppIdenticos,
 
-      epp_diferentes:
-        eppDiferentes,
+      epp_diferentes: eppDiferentes,
 
-      matriz:
-        matrizComparacion,
+      matriz: matrizComparacion,
     },
   };
 };
@@ -3670,132 +3131,80 @@ const construirSnapshotEpp = async (clienteId) => {
 // NO GUARDA NADA
 // =====================================================
 
-app.get(
-  "/registros-epp/preview/:clienteId",
-  async (req, res) => {
-    try {
-      const clienteId =
-        parseInt(
-          req.params.clienteId,
-          10,
-        );
+app.get("/registros-epp/preview/:clienteId", async (req, res) => {
+  try {
+    const clienteId = parseInt(req.params.clienteId, 10);
 
-      if (!clienteId) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "clienteId inválido",
-        });
-      }
-
-      const snapshot =
-        await construirSnapshotEpp(
-          clienteId,
-        );
-
-      const ahora =
-        new Date();
-
-      res.json({
-        success: true,
-
-        fecha_hora:
-          ahora.toISOString(),
-
-        snapshot,
-      });
-    } catch (error) {
-      console.error(
-        "ERROR GENERANDO PREVISUALIZACIÓN EPP:",
-        error,
-      );
-
-      res.status(500).json({
+    if (!clienteId) {
+      return res.status(400).json({
         success: false,
-        error:
-          error.message,
+        error: "clienteId inválido",
       });
     }
-  },
-);
+
+    const snapshot = await construirSnapshotEpp(clienteId);
+
+    const ahora = new Date();
+
+    res.json({
+      success: true,
+
+      fecha_hora: ahora.toISOString(),
+
+      snapshot,
+    });
+  } catch (error) {
+    console.error("ERROR GENERANDO PREVISUALIZACIÓN EPP:", error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
 
 // =====================================================
 // GUARDAR NUEVO REGISTRO HISTÓRICO
 // =====================================================
 
-app.post(
-  "/registros-epp",
-  async (req, res) => {
-    const client =
-      await db.connect();
+app.post("/registros-epp", async (req, res) => {
+  const client = await db.connect();
 
-    try {
-      const {
-        cliente_id,
-        usuario_id,
-      } = req.body;
+  try {
+    const { cliente_id, usuario_id } = req.body;
 
-      const clienteId =
-        parseInt(
-          cliente_id,
-          10,
-        );
+    const clienteId = parseInt(cliente_id, 10);
 
-      const usuarioId =
-        usuario_id
-          ? parseInt(
-              usuario_id,
-              10,
-            )
-          : null;
+    const usuarioId = usuario_id ? parseInt(usuario_id, 10) : null;
 
-      if (!clienteId) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "cliente_id es requerido",
-        });
-      }
+    if (!clienteId) {
+      return res.status(400).json({
+        success: false,
+        error: "cliente_id es requerido",
+      });
+    }
 
-      console.log(
-        "====================================",
-      );
-      console.log(
-        "GUARDANDO HISTÓRICO EPP",
-      );
-      console.log(
-        "CLIENTE:",
-        clienteId,
-      );
-      console.log(
-        "USUARIO:",
-        usuarioId,
-      );
-      console.log(
-        "====================================",
-      );
+    console.log("====================================");
+    console.log("GUARDANDO HISTÓRICO EPP");
+    console.log("CLIENTE:", clienteId);
+    console.log("USUARIO:", usuarioId);
+    console.log("====================================");
 
-      // ===============================================
-      // CONSTRUIR SNAPSHOT DESDE LOS DATOS ACTUALES
-      //
-      // IMPORTANTE:
-      // No confiamos en un snapshot enviado
-      // por el frontend.
-      // El backend construye el snapshot real.
-      // ===============================================
+    // ===============================================
+    // CONSTRUIR SNAPSHOT DESDE LOS DATOS ACTUALES
+    //
+    // IMPORTANTE:
+    // No confiamos en un snapshot enviado
+    // por el frontend.
+    // El backend construye el snapshot real.
+    // ===============================================
 
-      const snapshot =
-        await construirSnapshotEpp(
-          clienteId,
-        );
+    const snapshot = await construirSnapshotEpp(clienteId);
 
-      await client.query(
-        "BEGIN",
-      );
+    await client.query("BEGIN");
 
-      const result =
-        await client.query(
-          `
+    const result = await client.query(
+      `
           INSERT INTO registros_epp_historico
           (
             cliente_id,
@@ -3825,92 +3234,62 @@ app.post(
             hora_registro,
             created_at
           `,
-          [
-            clienteId,
-            usuarioId,
-            snapshot.cliente
-              .nombre_empresa,
-            JSON.stringify(
-              snapshot,
-            ),
-          ],
-        );
+      [
+        clienteId,
+        usuarioId,
+        snapshot.cliente.nombre_empresa,
+        JSON.stringify(snapshot),
+      ],
+    );
 
-      await client.query(
-        "COMMIT",
-      );
+    await client.query("COMMIT");
 
-      console.log(
-        "REGISTRO HISTÓRICO GUARDADO:",
-        result.rows[0],
-      );
+    console.log("REGISTRO HISTÓRICO GUARDADO:", result.rows[0]);
 
-      res.json({
-        success: true,
+    res.json({
+      success: true,
 
-        message:
-          "Registro guardado correctamente",
+      message: "Registro guardado correctamente",
 
-        registro:
-          result.rows[0],
+      registro: result.rows[0],
 
-        snapshot,
-      });
-    } catch (error) {
-      try {
-        await client.query(
-          "ROLLBACK",
-        );
-      } catch (
-        rollbackError
-      ) {
-        console.log(
-          "ERROR ROLLBACK:",
-          rollbackError.message,
-        );
-      }
-
-      console.error(
-        "ERROR GUARDANDO HISTÓRICO EPP:",
-        error,
-      );
-
-      res.status(500).json({
-        success: false,
-        error:
-          error.message,
-      });
-    } finally {
-      client.release();
+      snapshot,
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.log("ERROR ROLLBACK:", rollbackError.message);
     }
-  },
-);
+
+    console.error("ERROR GUARDANDO HISTÓRICO EPP:", error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  } finally {
+    client.release();
+  }
+});
 
 // =====================================================
 // LISTAR REGISTROS ANTERIORES DEL CLIENTE
 // =====================================================
 
-app.get(
-  "/registros-epp/cliente/:clienteId",
-  async (req, res) => {
-    try {
-      const clienteId =
-        parseInt(
-          req.params.clienteId,
-          10,
-        );
+app.get("/registros-epp/cliente/:clienteId", async (req, res) => {
+  try {
+    const clienteId = parseInt(req.params.clienteId, 10);
 
-      if (!clienteId) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "clienteId inválido",
-        });
-      }
+    if (!clienteId) {
+      return res.status(400).json({
+        success: false,
+        error: "clienteId inválido",
+      });
+    }
 
-      const result =
-        await db.query(
-          `
+    const result = await db.query(
+      `
           SELECT
             id,
             cliente_id,
@@ -3929,57 +3308,41 @@ app.get(
             hora_registro DESC,
             id DESC
           `,
-          [
-            clienteId,
-          ],
-        );
+      [clienteId],
+    );
 
-      res.json({
-        success: true,
+    res.json({
+      success: true,
 
-        registros:
-          result.rows,
-      });
-    } catch (error) {
-      console.error(
-        "ERROR CONSULTANDO HISTÓRICO EPP:",
-        error,
-      );
+      registros: result.rows,
+    });
+  } catch (error) {
+    console.error("ERROR CONSULTANDO HISTÓRICO EPP:", error);
 
-      res.status(500).json({
-        success: false,
-        error:
-          error.message,
-      });
-    }
-  },
-);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
 
 // =====================================================
 // OBTENER REGISTRO HISTÓRICO COMPLETO
 // =====================================================
 
-app.get(
-  "/registros-epp/detalle/:registroId",
-  async (req, res) => {
-    try {
-      const registroId =
-        parseInt(
-          req.params.registroId,
-          10,
-        );
+app.get("/registros-epp/detalle/:registroId", async (req, res) => {
+  try {
+    const registroId = parseInt(req.params.registroId, 10);
 
-      if (!registroId) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "registroId inválido",
-        });
-      }
+    if (!registroId) {
+      return res.status(400).json({
+        success: false,
+        error: "registroId inválido",
+      });
+    }
 
-      const result =
-        await db.query(
-          `
+    const result = await db.query(
+      `
           SELECT
             id,
             cliente_id,
@@ -3996,67 +3359,48 @@ app.get(
 
           LIMIT 1
           `,
-          [
-            registroId,
-          ],
-        );
+      [registroId],
+    );
 
-      if (
-        result.rows.length === 0
-      ) {
-        return res.status(404).json({
-          success: false,
-          error:
-            "El registro no existe",
-        });
-      }
-
-      res.json({
-        success: true,
-
-        registro:
-          result.rows[0],
-      });
-    } catch (error) {
-      console.error(
-        "ERROR CONSULTANDO REGISTRO EPP:",
-        error,
-      );
-
-      res.status(500).json({
+    if (result.rows.length === 0) {
+      return res.status(404).json({
         success: false,
-        error:
-          error.message,
+        error: "El registro no existe",
       });
     }
-  },
-);
+
+    res.json({
+      success: true,
+
+      registro: result.rows[0],
+    });
+  } catch (error) {
+    console.error("ERROR CONSULTANDO REGISTRO EPP:", error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
 
 // =====================================================
 // FECHAS CON REGISTROS PARA EL CALENDARIO
 // =====================================================
 
-app.get(
-  "/registros-epp/calendario/:clienteId",
-  async (req, res) => {
-    try {
-      const clienteId =
-        parseInt(
-          req.params.clienteId,
-          10,
-        );
+app.get("/registros-epp/calendario/:clienteId", async (req, res) => {
+  try {
+    const clienteId = parseInt(req.params.clienteId, 10);
 
-      if (!clienteId) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "clienteId inválido",
-        });
-      }
+    if (!clienteId) {
+      return res.status(400).json({
+        success: false,
+        error: "clienteId inválido",
+      });
+    }
 
-      const result =
-        await db.query(
-          `
+    const result = await db.query(
+      `
           SELECT
             fecha_registro,
             COUNT(*)::INTEGER AS cantidad
@@ -4069,31 +3413,23 @@ app.get(
 
           ORDER BY fecha_registro DESC
           `,
-          [
-            clienteId,
-          ],
-        );
+      [clienteId],
+    );
 
-      res.json({
-        success: true,
+    res.json({
+      success: true,
 
-        fechas:
-          result.rows,
-      });
-    } catch (error) {
-      console.error(
-        "ERROR CONSULTANDO CALENDARIO EPP:",
-        error,
-      );
+      fechas: result.rows,
+    });
+  } catch (error) {
+    console.error("ERROR CONSULTANDO CALENDARIO EPP:", error);
 
-      res.status(500).json({
-        success: false,
-        error:
-          error.message,
-      });
-    }
-  },
-);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
 
 // =====================================================
 // GUARDAR INSPECCIÓN SEMANAL DE CONDICIONES DEL INMUEBLE
@@ -4105,12 +3441,7 @@ app.post("/registros-semanales", async (req, res) => {
   try {
     client = await db.connect();
 
-    const {
-      cliente_id,
-      usuario_id,
-      tipo_registro,
-      condiciones,
-    } = req.body;
+    const { cliente_id, usuario_id, tipo_registro, condiciones } = req.body;
 
     console.log("========================================");
     console.log("POST /registros-semanales");
@@ -4191,10 +3522,7 @@ app.post("/registros-semanales", async (req, res) => {
         });
       }
 
-      if (
-        item.estado !== "bueno" &&
-        item.estado !== "malo"
-      ) {
+      if (item.estado !== "bueno" && item.estado !== "malo") {
         return res.status(400).json({
           success: false,
           error: `Estado inválido para ${item.nombre}.`,
@@ -4202,20 +3530,14 @@ app.post("/registros-semanales", async (req, res) => {
       }
 
       if (item.estado === "malo") {
-        if (
-          !item.condicion ||
-          !String(item.condicion).trim()
-        ) {
+        if (!item.condicion || !String(item.condicion).trim()) {
           return res.status(400).json({
             success: false,
             error: `Debes agregar la condición detectada para ${item.nombre}.`,
           });
         }
 
-        if (
-          !item.accion_correctiva ||
-          !String(item.accion_correctiva).trim()
-        ) {
+        if (!item.accion_correctiva || !String(item.accion_correctiva).trim()) {
           return res.status(400).json({
             success: false,
             error: `Debes agregar la acción correctiva para ${item.nombre}.`,
@@ -4228,17 +3550,14 @@ app.post("/registros-semanales", async (req, res) => {
     // VALIDAR DUPLICADOS
     // =====================================================
 
-    const nombresRecibidos = condiciones.map(
-      (item) => item.nombre,
-    );
+    const nombresRecibidos = condiciones.map((item) => item.nombre);
 
     const nombresUnicos = new Set(nombresRecibidos);
 
     if (nombresUnicos.size !== condicionesPermitidas.length) {
       return res.status(400).json({
         success: false,
-        error:
-          "Existen condiciones duplicadas o faltantes.",
+        error: "Existen condiciones duplicadas o faltantes.",
       });
     }
 
@@ -4302,11 +3621,7 @@ app.post("/registros-semanales", async (req, res) => {
         hora_registro,
         created_at
       `,
-      [
-        cliente_id,
-        usuario_id || null,
-        cliente.nombre_empresa,
-      ],
+      [cliente_id, usuario_id || null, cliente.nombre_empresa],
     );
 
     const inspeccion = inspeccionResult.rows[0];
@@ -4316,48 +3631,38 @@ app.post("/registros-semanales", async (req, res) => {
     // =====================================================
 
     for (const item of condiciones) {
-      const condicionTexto =
-        item.estado === "malo"
-          ? String(item.condicion || "").trim()
-          : null;
-
-      const accionCorrectiva =
-        item.estado === "malo"
-          ? String(item.accion_correctiva || "").trim()
-          : null;
+      const { nombre, estado, condicion, accion_correctiva } = item;
 
       await client.query(
-  `
-  INSERT INTO inspecciones_semanales_detalle
-  (
-    inspeccion_id,
-    seccion,
-    nombre_condicion,
-    estado,
-    condicion,
-    accion_correctiva
-  )
-  VALUES
-  (
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    $6
-  )
-  `,
-  [
-    inspeccion.id,
-    "condiciones_inmueble",
-    nombre,
-    estado,
-    estado === "malo" ? condicion : null,
-    estado === "malo"
-      ? accion_correctiva
-      : null,
-  ],
-);
+        `
+    INSERT INTO inspecciones_semanales_detalle
+    (
+      inspeccion_id,
+      seccion,
+      nombre_condicion,
+      estado,
+      condicion,
+      accion_correctiva
+    )
+    VALUES
+    (
+      $1,
+      $2,
+      $3,
+      $4,
+      $5,
+      $6
+    )
+    `,
+        [
+          inspeccion.id,
+          "condiciones_inmueble",
+          nombre,
+          estado,
+          estado === "malo" ? String(condicion || "").trim() : null,
+          estado === "malo" ? String(accion_correctiva || "").trim() : null,
+        ],
+      );
     }
 
     // =====================================================
@@ -4366,10 +3671,7 @@ app.post("/registros-semanales", async (req, res) => {
 
     await client.query("COMMIT");
 
-    console.log(
-      "REGISTRO SEMANAL GUARDADO:",
-      inspeccion.id,
-    );
+    console.log("REGISTRO SEMANAL GUARDADO:", inspeccion.id);
 
     return res.status(201).json({
       success: true,
@@ -4381,17 +3683,11 @@ app.post("/registros-semanales", async (req, res) => {
       try {
         await client.query("ROLLBACK");
       } catch (rollbackError) {
-        console.log(
-          "ERROR HACIENDO ROLLBACK:",
-          rollbackError.message,
-        );
+        console.log("ERROR HACIENDO ROLLBACK:", rollbackError.message);
       }
     }
 
-    console.log(
-      "ERROR POST /registros-semanales:",
-      error,
-    );
+    console.log("ERROR POST /registros-semanales:", error);
 
     return res.status(500).json({
       success: false,
@@ -4410,244 +3706,176 @@ app.post("/registros-semanales", async (req, res) => {
 // INSPECCIÓN SEMANAL
 // =====================================================
 
-app.post(
-  "/registros-semanales/incendios",
-  async (req, res) => {
-    let client;
+app.post("/registros-semanales/incendios", async (req, res) => {
+  let client;
 
-    try {
-      client = await db.connect();
+  try {
+    client = await db.connect();
 
-      const {
-        cliente_id,
-        usuario_id,
-        tipo_registro,
-        condiciones,
-      } = req.body;
+    const { cliente_id, usuario_id, tipo_registro, condiciones } = req.body;
 
-      console.log(
-        "========================================",
-      );
+    console.log("========================================");
 
-      console.log(
-        "POST /registros-semanales/incendios",
-      );
+    console.log("POST /registros-semanales/incendios");
 
-      console.log(
-        "BODY:",
-        req.body,
-      );
+    console.log("BODY:", req.body);
 
-      console.log(
-        "========================================",
-      );
+    console.log("========================================");
 
-      // =====================================================
-      // VALIDAR CLIENTE
-      // =====================================================
+    // =====================================================
+    // VALIDAR CLIENTE
+    // =====================================================
 
-      if (!cliente_id) {
+    if (!cliente_id) {
+      return res.status(400).json({
+        success: false,
+        error: "cliente_id es requerido.",
+      });
+    }
+
+    // =====================================================
+    // VALIDAR TIPO
+    // =====================================================
+
+    if (tipo_registro !== "proteccion_incendios") {
+      return res.status(400).json({
+        success: false,
+        error: "El tipo_registro debe ser proteccion_incendios.",
+      });
+    }
+
+    // =====================================================
+    // VALIDAR ARRAY
+    // =====================================================
+
+    if (!Array.isArray(condiciones)) {
+      return res.status(400).json({
+        success: false,
+        error: "condiciones debe ser un arreglo.",
+      });
+    }
+
+    // =====================================================
+    // ELEMENTOS OBLIGATORIOS
+    // =====================================================
+
+    const condicionesEsperadas = [
+      "Gabinete",
+      "Señalización",
+      "Extintores",
+      "Estrobos",
+      "Hidrantes",
+      "Rutas de Evacuación",
+    ];
+
+    if (condiciones.length !== condicionesEsperadas.length) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Deben enviarse exactamente 6 registros de Protección contra Incendios.",
+      });
+    }
+
+    // =====================================================
+    // VALIDAR NOMBRES
+    // =====================================================
+
+    const nombresRecibidos = condiciones.map((item) => item.nombre);
+
+    const faltantes = condicionesEsperadas.filter(
+      (nombre) => !nombresRecibidos.includes(nombre),
+    );
+
+    if (faltantes.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Faltan las siguientes verificaciones: ${faltantes.join(", ")}`,
+      });
+    }
+
+    // =====================================================
+    // VALIDAR DUPLICADOS
+    // =====================================================
+
+    const nombresUnicos = new Set(nombresRecibidos);
+
+    if (nombresUnicos.size !== condicionesEsperadas.length) {
+      return res.status(400).json({
+        success: false,
+        error: "Existen verificaciones duplicadas.",
+      });
+    }
+
+    // =====================================================
+    // VALIDAR CONTENIDO DE CADA REGISTRO
+    // =====================================================
+
+    for (const item of condiciones) {
+      const { nombre, estado, condicion, accion_correctiva } = item;
+
+      if (!["bueno", "malo"].includes(estado)) {
         return res.status(400).json({
           success: false,
-          error:
-            "cliente_id es requerido.",
+          error: `El estado de "${nombre}" debe ser bueno o malo.`,
         });
       }
 
-      // =====================================================
-      // VALIDAR TIPO
-      // =====================================================
-
-      if (
-        tipo_registro !==
-        "proteccion_incendios"
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "El tipo_registro debe ser proteccion_incendios.",
-        });
-      }
-
-      // =====================================================
-      // VALIDAR ARRAY
-      // =====================================================
-
-      if (!Array.isArray(condiciones)) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "condiciones debe ser un arreglo.",
-        });
-      }
-
-      // =====================================================
-      // ELEMENTOS OBLIGATORIOS
-      // =====================================================
-
-      const condicionesEsperadas = [
-        "Gabinete",
-        "Señalización",
-        "Extintores",
-        "Estrobos",
-        "Hidrantes",
-        "Rutas de Evacuación",
-      ];
-
-      if (
-        condiciones.length !==
-        condicionesEsperadas.length
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Deben enviarse exactamente 6 registros de Protección contra Incendios.",
-        });
-      }
-
-      // =====================================================
-      // VALIDAR NOMBRES
-      // =====================================================
-
-      const nombresRecibidos =
-        condiciones.map(
-          (item) => item.nombre,
-        );
-
-      const faltantes =
-        condicionesEsperadas.filter(
-          (nombre) =>
-            !nombresRecibidos.includes(
-              nombre,
-            ),
-        );
-
-      if (faltantes.length > 0) {
-        return res.status(400).json({
-          success: false,
-          error:
-            `Faltan las siguientes verificaciones: ${faltantes.join(
-              ", ",
-            )}`,
-        });
-      }
-
-      // =====================================================
-      // VALIDAR DUPLICADOS
-      // =====================================================
-
-      const nombresUnicos =
-        new Set(nombresRecibidos);
-
-      if (
-        nombresUnicos.size !==
-        condicionesEsperadas.length
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Existen verificaciones duplicadas.",
-        });
-      }
-
-      // =====================================================
-      // VALIDAR CONTENIDO DE CADA REGISTRO
-      // =====================================================
-
-      for (const item of condiciones) {
-        const {
-          nombre,
-          estado,
-          condicion,
-          accion_correctiva,
-        } = item;
-
-        if (
-          !["bueno", "malo"].includes(
-            estado,
-          )
-        ) {
+      if (estado === "malo") {
+        if (!condicion || !String(condicion).trim()) {
           return res.status(400).json({
             success: false,
-            error:
-              `El estado de "${nombre}" debe ser bueno o malo.`,
+            error: `"${nombre}" está marcado como Malo y requiere Condición.`,
           });
         }
 
-        if (estado === "malo") {
-          if (
-            !condicion ||
-            !String(
-              condicion,
-            ).trim()
-          ) {
-            return res.status(400).json({
-              success: false,
-              error:
-                `"${nombre}" está marcado como Malo y requiere Condición.`,
-            });
-          }
-
-          if (
-            !accion_correctiva ||
-            !String(
-              accion_correctiva,
-            ).trim()
-          ) {
-            return res.status(400).json({
-              success: false,
-              error:
-                `"${nombre}" está marcado como Malo y requiere Acción correctiva.`,
-            });
-          }
+        if (!accion_correctiva || !String(accion_correctiva).trim()) {
+          return res.status(400).json({
+            success: false,
+            error: `"${nombre}" está marcado como Malo y requiere Acción correctiva.`,
+          });
         }
       }
+    }
 
-      // =====================================================
-      // VERIFICAR CLIENTE
-      // =====================================================
+    // =====================================================
+    // VERIFICAR CLIENTE
+    // =====================================================
 
-      const clienteResult =
-        await client.query(
-          `
+    const clienteResult = await client.query(
+      `
           SELECT
             id,
             nombre_empresa
           FROM clientes
           WHERE id = $1
           `,
-          [cliente_id],
-        );
+      [cliente_id],
+    );
 
-      if (
-        clienteResult.rows.length === 0
-      ) {
-        return res.status(404).json({
-          success: false,
-          error:
-            "El cliente indicado no existe.",
-        });
-      }
+    if (clienteResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "El cliente indicado no existe.",
+      });
+    }
 
-      const cliente =
-        clienteResult.rows[0];
+    const cliente = clienteResult.rows[0];
 
-      // =====================================================
-      // INICIAR TRANSACCIÓN
-      // =====================================================
+    // =====================================================
+    // INICIAR TRANSACCIÓN
+    // =====================================================
 
-      await client.query("BEGIN");
+    await client.query("BEGIN");
 
-      // =====================================================
-      // BUSCAR INSPECCIÓN DE HOY
-      //
-      // SI YA SE GUARDÓ CONDICIONES DEL INMUEBLE
-      // REUTILIZAMOS LA MISMA INSPECCIÓN
-      // =====================================================
+    // =====================================================
+    // BUSCAR INSPECCIÓN DE HOY
+    //
+    // SI YA SE GUARDÓ CONDICIONES DEL INMUEBLE
+    // REUTILIZAMOS LA MISMA INSPECCIÓN
+    // =====================================================
 
-      const inspeccionExistente =
-        await client.query(
-          `
+    const inspeccionExistente = await client.query(
+      `
           SELECT
             id,
             cliente_id,
@@ -4666,26 +3894,18 @@ app.post(
 
           LIMIT 1
           `,
-          [cliente_id],
-        );
+      [cliente_id],
+    );
 
-      let inspeccion;
+    let inspeccion;
 
-      if (
-        inspeccionExistente.rows.length >
-        0
-      ) {
-        inspeccion =
-          inspeccionExistente.rows[0];
+    if (inspeccionExistente.rows.length > 0) {
+      inspeccion = inspeccionExistente.rows[0];
 
-        console.log(
-          "REUTILIZANDO INSPECCIÓN:",
-          inspeccion.id,
-        );
-      } else {
-        const nuevaInspeccion =
-          await client.query(
-            `
+      console.log("REUTILIZANDO INSPECCIÓN:", inspeccion.id);
+    } else {
+      const nuevaInspeccion = await client.query(
+        `
             INSERT INTO inspecciones_semanales
             (
               cliente_id,
@@ -4712,57 +3932,41 @@ app.post(
               hora_registro,
               created_at
             `,
-            [
-              cliente_id,
-              usuario_id || null,
-              cliente.nombre_empresa,
-            ],
-          );
+        [cliente_id, usuario_id || null, cliente.nombre_empresa],
+      );
 
-        inspeccion =
-          nuevaInspeccion.rows[0];
+      inspeccion = nuevaInspeccion.rows[0];
 
-        console.log(
-          "NUEVA INSPECCIÓN:",
-          inspeccion.id,
-        );
-      }
+      console.log("NUEVA INSPECCIÓN:", inspeccion.id);
+    }
 
-      // =====================================================
-      // ELIMINAR REGISTROS ANTERIORES DE INCENDIOS
-      // PARA ESA MISMA INSPECCIÓN
-      //
-      // ESTO PERMITE CORREGIR / VOLVER A GUARDAR
-      // SIN DUPLICAR LOS 6 REGISTROS
-      // =====================================================
+    // =====================================================
+    // ELIMINAR REGISTROS ANTERIORES DE INCENDIOS
+    // PARA ESA MISMA INSPECCIÓN
+    //
+    // ESTO PERMITE CORREGIR / VOLVER A GUARDAR
+    // SIN DUPLICAR LOS 6 REGISTROS
+    // =====================================================
 
-      await client.query(
-        `
+    await client.query(
+      `
         DELETE FROM inspecciones_semanales_detalle
 
         WHERE inspeccion_id = $1
           AND seccion = $2
         `,
-        [
-          inspeccion.id,
-          "proteccion_incendios",
-        ],
-      );
+      [inspeccion.id, "proteccion_incendios"],
+    );
 
-      // =====================================================
-      // INSERTAR LOS 6 REGISTROS
-      // =====================================================
+    // =====================================================
+    // INSERTAR LOS 6 REGISTROS
+    // =====================================================
 
-      for (const item of condiciones) {
-        const {
-          nombre,
-          estado,
-          condicion,
-          accion_correctiva,
-        } = item;
+    for (const item of condiciones) {
+      const { nombre, estado, condicion, accion_correctiva } = item;
 
-        await client.query(
-          `
+      await client.query(
+        `
           INSERT INTO inspecciones_semanales_detalle
           (
             inspeccion_id,
@@ -4782,95 +3986,62 @@ app.post(
             $6
           )
           `,
-          [
-            inspeccion.id,
-            "proteccion_incendios",
-            nombre,
-            estado,
-            estado === "malo"
-              ? String(
-                  condicion,
-                ).trim()
-              : null,
-            estado === "malo"
-              ? String(
-                  accion_correctiva,
-                ).trim()
-              : null,
-          ],
-        );
-      }
-
-      // =====================================================
-      // CONFIRMAR
-      // =====================================================
-
-      await client.query("COMMIT");
-
-      console.log(
-        "PROTECCIÓN CONTRA INCENDIOS GUARDADA",
+        [
+          inspeccion.id,
+          "proteccion_incendios",
+          nombre,
+          estado,
+          estado === "malo" ? String(condicion).trim() : null,
+          estado === "malo" ? String(accion_correctiva).trim() : null,
+        ],
       );
+    }
 
-      console.log(
-        "INSPECCIÓN:",
-        inspeccion.id,
-      );
+    // =====================================================
+    // CONFIRMAR
+    // =====================================================
 
-      return res
-        .status(201)
-        .json({
-          success: true,
+    await client.query("COMMIT");
 
-          message:
-            "Protección contra Incendios guardada correctamente.",
+    console.log("PROTECCIÓN CONTRA INCENDIOS GUARDADA");
 
-          registro: inspeccion,
-        });
-    } catch (error) {
-      if (client) {
-        try {
-          await client.query(
-            "ROLLBACK",
-          );
-        } catch (
-          rollbackError
-        ) {
-          console.log(
-            "ERROR HACIENDO ROLLBACK:",
-            rollbackError.message,
-          );
-        }
-      }
+    console.log("INSPECCIÓN:", inspeccion.id);
 
-      console.error(
-        "========================================",
-      );
+    return res.status(201).json({
+      success: true,
 
-      console.error(
-        "ERROR POST /registros-semanales/incendios:",
-        error,
-      );
+      message: "Protección contra Incendios guardada correctamente.",
 
-      console.error(
-        "========================================",
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          "Error al guardar Protección contra Incendios.",
-
-        detalle:
-          error.message,
-      });
-    } finally {
-      if (client) {
-        client.release();
+      registro: inspeccion,
+    });
+  } catch (error) {
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.log("ERROR HACIENDO ROLLBACK:", rollbackError.message);
       }
     }
-  },
-);
+
+    console.error("========================================");
+
+    console.error("ERROR POST /registros-semanales/incendios:", error);
+
+    console.error("========================================");
+
+    return res.status(500).json({
+      success: false,
+
+      error: "Error al guardar Protección contra Incendios.",
+
+      detalle: error.message,
+    });
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+});
 
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
