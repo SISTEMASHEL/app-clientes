@@ -3025,6 +3025,835 @@ app.use((error, req, res, next) => {
   next();
 });
 
+// =====================================================
+// HISTÓRICO DE REGISTROS EPP
+// FUNCIÓN PARA CONSTRUIR SNAPSHOT DEL CLIENTE
+// =====================================================
+
+const construirSnapshotEpp = async (clienteId) => {
+  // ===================================================
+  // 1. OBTENER CLIENTE
+  // ===================================================
+
+  const clienteResult = await db.query(
+    `
+    SELECT
+      id,
+      nombre_empresa
+    FROM clientes
+    WHERE id = $1
+    `,
+    [clienteId],
+  );
+
+  if (clienteResult.rows.length === 0) {
+    throw new Error("El cliente indicado no existe");
+  }
+
+  const cliente = clienteResult.rows[0];
+
+  // ===================================================
+  // 2. OBTENER ÁREAS
+  // ===================================================
+
+  const areasResult = await db.query(
+    `
+    SELECT
+      id,
+      nombre_area,
+      descripcion
+    FROM areas_trabajo
+    WHERE cliente_id = $1
+    ORDER BY nombre_area
+    `,
+    [clienteId],
+  );
+
+  // ===================================================
+  // 3. OBTENER PUESTOS DEL CLIENTE
+  // ===================================================
+
+  const puestosResult = await db.query(
+    `
+    SELECT
+      p.id,
+      p.area_id,
+      p.puesto,
+      p.numero_usuarios,
+      p.descripcion
+    FROM puestos_trabajo p
+
+    INNER JOIN areas_trabajo a
+      ON a.id = p.area_id
+
+    WHERE a.cliente_id = $1
+
+    ORDER BY
+      a.nombre_area,
+      p.puesto
+    `,
+    [clienteId],
+  );
+
+  // ===================================================
+  // 4. OBTENER INVENTARIO EPP DEL CLIENTE
+  // ===================================================
+
+  const inventarioResult = await db.query(
+    `
+    SELECT
+      i.id,
+      i.clave_producto,
+      i.nombre_producto,
+      i.marca,
+      i.descripcion,
+      i.cantidad_total,
+      i.area_id,
+      i.puesto_id,
+      i.ficha_tecnica,
+      i.certificado
+
+    FROM inventario i
+
+    WHERE i.cliente_id = $1
+
+      AND (
+        i.tipo_producto = 'EPP'
+        OR i.tipo_producto IS NULL
+      )
+
+    ORDER BY
+      i.area_id,
+      i.puesto_id,
+      i.nombre_producto
+    `,
+    [clienteId],
+  );
+
+  const areas = areasResult.rows;
+  const puestos = puestosResult.rows;
+  const inventario = inventarioResult.rows;
+
+  // ===================================================
+  // FUNCIÓN PARA GENERAR UNA CLAVE COMPARABLE
+  // ===================================================
+
+  const obtenerClaveEpp = (producto) => {
+    if (
+      producto.clave_producto !== null &&
+      producto.clave_producto !== undefined &&
+      String(producto.clave_producto).trim() !== ""
+    ) {
+      return String(producto.clave_producto)
+        .trim()
+        .toLowerCase();
+    }
+
+    return `${producto.nombre_producto || ""}|${producto.marca || ""}`
+      .trim()
+      .toLowerCase();
+  };
+
+  // ===================================================
+  // 5. CONSTRUIR ÁREAS
+  // ===================================================
+
+  const areasProcesadas = areas.map((area) => {
+    const puestosArea = puestos.filter(
+      (puesto) =>
+        Number(puesto.area_id) ===
+        Number(area.id),
+    );
+
+    const inventarioArea = inventario.filter(
+      (producto) =>
+        Number(producto.area_id) ===
+        Number(area.id),
+    );
+
+    // ===============================================
+    // PUESTOS + EPP
+    // ===============================================
+
+    const puestosProcesados = puestosArea.map(
+      (puesto) => {
+        const productosPuesto =
+          inventarioArea.filter(
+            (producto) =>
+              Number(producto.puesto_id) ===
+              Number(puesto.id),
+          );
+
+        return {
+          puesto_id: puesto.id,
+          puesto: puesto.puesto,
+          numero_usuarios:
+            puesto.numero_usuarios,
+          descripcion:
+            puesto.descripcion,
+
+          epp: productosPuesto.map(
+            (producto) => ({
+              id: producto.id,
+              clave_producto:
+                producto.clave_producto,
+              nombre_producto:
+                producto.nombre_producto,
+              marca:
+                producto.marca,
+              descripcion:
+                producto.descripcion,
+              cantidad_total:
+                producto.cantidad_total,
+              ficha_tecnica:
+                producto.ficha_tecnica,
+              certificado:
+                producto.certificado,
+            }),
+          ),
+        };
+      },
+    );
+
+    // ===============================================
+    // TODOS LOS EPP DISTINTOS DEL ÁREA
+    // ===============================================
+
+    const mapaProductosArea = new Map();
+
+    inventarioArea.forEach((producto) => {
+      const clave =
+        obtenerClaveEpp(producto);
+
+      if (!mapaProductosArea.has(clave)) {
+        mapaProductosArea.set(
+          clave,
+          producto,
+        );
+      }
+    });
+
+    const eppTotalArea = Array.from(
+      mapaProductosArea.values(),
+    ).map((producto) => ({
+      clave_producto:
+        producto.clave_producto,
+      nombre_producto:
+        producto.nombre_producto,
+      marca:
+        producto.marca,
+    }));
+
+    // ===============================================
+    // EPP COMÚN
+    //
+    // Debe aparecer en TODOS los puestos del área
+    // ===============================================
+
+    let clavesComunes = [];
+
+    if (puestosProcesados.length > 0) {
+      const primerPuesto =
+        puestosProcesados[0];
+
+      clavesComunes =
+        primerPuesto.epp.map(
+          obtenerClaveEpp,
+        );
+
+      for (
+        let i = 1;
+        i < puestosProcesados.length;
+        i++
+      ) {
+        const clavesPuesto =
+          new Set(
+            puestosProcesados[i].epp.map(
+              obtenerClaveEpp,
+            ),
+          );
+
+        clavesComunes =
+          clavesComunes.filter(
+            (clave) =>
+              clavesPuesto.has(clave),
+          );
+      }
+    }
+
+    clavesComunes = [
+      ...new Set(clavesComunes),
+    ];
+
+    const eppComun =
+      clavesComunes
+        .map((clave) => {
+          const producto =
+            inventarioArea.find(
+              (item) =>
+                obtenerClaveEpp(item) ===
+                clave,
+            );
+
+          if (!producto) {
+            return null;
+          }
+
+          return {
+            clave_producto:
+              producto.clave_producto,
+            nombre_producto:
+              producto.nombre_producto,
+            marca:
+              producto.marca,
+          };
+        })
+        .filter(Boolean);
+
+    // ===============================================
+    // EPP ESPECÍFICO POR PUESTO
+    //
+    // Todo lo que NO forma parte del EPP común
+    // ===============================================
+
+    const comunesSet =
+      new Set(clavesComunes);
+
+    const eppEspecificoPuesto =
+      puestosProcesados.map(
+        (puesto) => ({
+          puesto_id:
+            puesto.puesto_id,
+
+          puesto:
+            puesto.puesto,
+
+          epp:
+            puesto.epp.filter(
+              (producto) =>
+                !comunesSet.has(
+                  obtenerClaveEpp(producto),
+                ),
+            ),
+        }),
+      );
+
+    return {
+      area_id:
+        area.id,
+
+      nombre_area:
+        area.nombre_area,
+
+      descripcion:
+        area.descripcion,
+
+      puestos:
+        puestosProcesados,
+
+      epp_total_area:
+        eppTotalArea,
+
+      epp_comun:
+        eppComun,
+
+      epp_especifico_puesto:
+        eppEspecificoPuesto,
+
+      // Lo calculamos después,
+      // comparándolo contra las demás áreas.
+      epp_exclusivo_area: [],
+    };
+  });
+
+  // ===================================================
+  // 6. CALCULAR EPP EXCLUSIVO DE CADA ÁREA
+  //
+  // Un EPP es exclusivo si no aparece
+  // en ninguna otra área del cliente.
+  // ===================================================
+
+  for (const area of areasProcesadas) {
+    const clavesOtrasAreas =
+      new Set();
+
+    for (
+      const otraArea
+      of areasProcesadas
+    ) {
+      if (
+        Number(otraArea.area_id) ===
+        Number(area.area_id)
+      ) {
+        continue;
+      }
+
+      otraArea.epp_total_area.forEach(
+        (producto) => {
+          clavesOtrasAreas.add(
+            obtenerClaveEpp(producto),
+          );
+        },
+      );
+    }
+
+    area.epp_exclusivo_area =
+      area.epp_total_area.filter(
+        (producto) =>
+          !clavesOtrasAreas.has(
+            obtenerClaveEpp(producto),
+          ),
+      );
+  }
+
+  // ===================================================
+  // 7. RESULTADO FINAL
+  // ===================================================
+
+  return {
+    cliente: {
+      id:
+        cliente.id,
+
+      nombre_empresa:
+        cliente.nombre_empresa,
+    },
+
+    areas:
+      areasProcesadas,
+  };
+};
+
+// =====================================================
+// PREVISUALIZAR NUEVO REGISTRO
+// NO GUARDA NADA
+// =====================================================
+
+app.get(
+  "/registros-epp/preview/:clienteId",
+  async (req, res) => {
+    try {
+      const clienteId =
+        parseInt(
+          req.params.clienteId,
+          10,
+        );
+
+      if (!clienteId) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "clienteId inválido",
+        });
+      }
+
+      const snapshot =
+        await construirSnapshotEpp(
+          clienteId,
+        );
+
+      const ahora =
+        new Date();
+
+      res.json({
+        success: true,
+
+        fecha_hora:
+          ahora.toISOString(),
+
+        snapshot,
+      });
+    } catch (error) {
+      console.error(
+        "ERROR GENERANDO PREVISUALIZACIÓN EPP:",
+        error,
+      );
+
+      res.status(500).json({
+        success: false,
+        error:
+          error.message,
+      });
+    }
+  },
+);
+
+// =====================================================
+// GUARDAR NUEVO REGISTRO HISTÓRICO
+// =====================================================
+
+app.post(
+  "/registros-epp",
+  async (req, res) => {
+    const client =
+      await db.connect();
+
+    try {
+      const {
+        cliente_id,
+        usuario_id,
+      } = req.body;
+
+      const clienteId =
+        parseInt(
+          cliente_id,
+          10,
+        );
+
+      const usuarioId =
+        usuario_id
+          ? parseInt(
+              usuario_id,
+              10,
+            )
+          : null;
+
+      if (!clienteId) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "cliente_id es requerido",
+        });
+      }
+
+      console.log(
+        "====================================",
+      );
+      console.log(
+        "GUARDANDO HISTÓRICO EPP",
+      );
+      console.log(
+        "CLIENTE:",
+        clienteId,
+      );
+      console.log(
+        "USUARIO:",
+        usuarioId,
+      );
+      console.log(
+        "====================================",
+      );
+
+      // ===============================================
+      // CONSTRUIR SNAPSHOT DESDE LOS DATOS ACTUALES
+      //
+      // IMPORTANTE:
+      // No confiamos en un snapshot enviado
+      // por el frontend.
+      // El backend construye el snapshot real.
+      // ===============================================
+
+      const snapshot =
+        await construirSnapshotEpp(
+          clienteId,
+        );
+
+      await client.query(
+        "BEGIN",
+      );
+
+      const result =
+        await client.query(
+          `
+          INSERT INTO registros_epp_historico
+          (
+            cliente_id,
+            usuario_id,
+            nombre_empresa,
+            fecha_registro,
+            hora_registro,
+            snapshot
+          )
+
+          VALUES
+          (
+            $1,
+            $2,
+            $3,
+            CURRENT_DATE,
+            CURRENT_TIME,
+            $4::jsonb
+          )
+
+          RETURNING
+            id,
+            cliente_id,
+            usuario_id,
+            nombre_empresa,
+            fecha_registro,
+            hora_registro,
+            created_at
+          `,
+          [
+            clienteId,
+            usuarioId,
+            snapshot.cliente
+              .nombre_empresa,
+            JSON.stringify(
+              snapshot,
+            ),
+          ],
+        );
+
+      await client.query(
+        "COMMIT",
+      );
+
+      console.log(
+        "REGISTRO HISTÓRICO GUARDADO:",
+        result.rows[0],
+      );
+
+      res.json({
+        success: true,
+
+        message:
+          "Registro guardado correctamente",
+
+        registro:
+          result.rows[0],
+
+        snapshot,
+      });
+    } catch (error) {
+      try {
+        await client.query(
+          "ROLLBACK",
+        );
+      } catch (
+        rollbackError
+      ) {
+        console.log(
+          "ERROR ROLLBACK:",
+          rollbackError.message,
+        );
+      }
+
+      console.error(
+        "ERROR GUARDANDO HISTÓRICO EPP:",
+        error,
+      );
+
+      res.status(500).json({
+        success: false,
+        error:
+          error.message,
+      });
+    } finally {
+      client.release();
+    }
+  },
+);
+
+// =====================================================
+// LISTAR REGISTROS ANTERIORES DEL CLIENTE
+// =====================================================
+
+app.get(
+  "/registros-epp/cliente/:clienteId",
+  async (req, res) => {
+    try {
+      const clienteId =
+        parseInt(
+          req.params.clienteId,
+          10,
+        );
+
+      if (!clienteId) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "clienteId inválido",
+        });
+      }
+
+      const result =
+        await db.query(
+          `
+          SELECT
+            id,
+            cliente_id,
+            usuario_id,
+            nombre_empresa,
+            fecha_registro,
+            hora_registro,
+            created_at
+
+          FROM registros_epp_historico
+
+          WHERE cliente_id = $1
+
+          ORDER BY
+            fecha_registro DESC,
+            hora_registro DESC,
+            id DESC
+          `,
+          [
+            clienteId,
+          ],
+        );
+
+      res.json({
+        success: true,
+
+        registros:
+          result.rows,
+      });
+    } catch (error) {
+      console.error(
+        "ERROR CONSULTANDO HISTÓRICO EPP:",
+        error,
+      );
+
+      res.status(500).json({
+        success: false,
+        error:
+          error.message,
+      });
+    }
+  },
+);
+
+// =====================================================
+// OBTENER REGISTRO HISTÓRICO COMPLETO
+// =====================================================
+
+app.get(
+  "/registros-epp/detalle/:registroId",
+  async (req, res) => {
+    try {
+      const registroId =
+        parseInt(
+          req.params.registroId,
+          10,
+        );
+
+      if (!registroId) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "registroId inválido",
+        });
+      }
+
+      const result =
+        await db.query(
+          `
+          SELECT
+            id,
+            cliente_id,
+            usuario_id,
+            nombre_empresa,
+            fecha_registro,
+            hora_registro,
+            snapshot,
+            created_at
+
+          FROM registros_epp_historico
+
+          WHERE id = $1
+
+          LIMIT 1
+          `,
+          [
+            registroId,
+          ],
+        );
+
+      if (
+        result.rows.length === 0
+      ) {
+        return res.status(404).json({
+          success: false,
+          error:
+            "El registro no existe",
+        });
+      }
+
+      res.json({
+        success: true,
+
+        registro:
+          result.rows[0],
+      });
+    } catch (error) {
+      console.error(
+        "ERROR CONSULTANDO REGISTRO EPP:",
+        error,
+      );
+
+      res.status(500).json({
+        success: false,
+        error:
+          error.message,
+      });
+    }
+  },
+);
+
+// =====================================================
+// FECHAS CON REGISTROS PARA EL CALENDARIO
+// =====================================================
+
+app.get(
+  "/registros-epp/calendario/:clienteId",
+  async (req, res) => {
+    try {
+      const clienteId =
+        parseInt(
+          req.params.clienteId,
+          10,
+        );
+
+      if (!clienteId) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "clienteId inválido",
+        });
+      }
+
+      const result =
+        await db.query(
+          `
+          SELECT
+            fecha_registro,
+            COUNT(*)::INTEGER AS cantidad
+
+          FROM registros_epp_historico
+
+          WHERE cliente_id = $1
+
+          GROUP BY fecha_registro
+
+          ORDER BY fecha_registro DESC
+          `,
+          [
+            clienteId,
+          ],
+        );
+
+      res.json({
+        success: true,
+
+        fechas:
+          result.rows,
+      });
+    } catch (error) {
+      console.error(
+        "ERROR CONSULTANDO CALENDARIO EPP:",
+        error,
+      );
+
+      res.status(500).json({
+        success: false,
+        error:
+          error.message,
+      });
+    }
+  },
+);
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
