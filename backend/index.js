@@ -4009,9 +4009,11 @@ app.get(
 // =====================================================
 
 app.post("/registros-semanales", async (req, res) => {
-  const client = await db.connect();
+  let client;
 
   try {
+    client = await db.connect();
+
     const {
       cliente_id,
       usuario_id,
@@ -4025,7 +4027,7 @@ app.post("/registros-semanales", async (req, res) => {
     console.log("========================================");
 
     // =====================================================
-    // VALIDACIONES GENERALES
+    // VALIDAR CLIENTE
     // =====================================================
 
     if (!cliente_id) {
@@ -4035,6 +4037,10 @@ app.post("/registros-semanales", async (req, res) => {
       });
     }
 
+    // =====================================================
+    // VALIDAR TIPO
+    // =====================================================
+
     if (tipo_registro !== "semanal") {
       return res.status(400).json({
         success: false,
@@ -4042,16 +4048,16 @@ app.post("/registros-semanales", async (req, res) => {
       });
     }
 
+    // =====================================================
+    // VALIDAR CONDICIONES
+    // =====================================================
+
     if (!Array.isArray(condiciones) || condiciones.length === 0) {
       return res.status(400).json({
         success: false,
         error: "Debes enviar las condiciones del inmueble.",
       });
     }
-
-    // =====================================================
-    // VALIDAR LAS 7 CONDICIONES ESPERADAS
-    // =====================================================
 
     const condicionesPermitidas = [
       "Techo",
@@ -4063,68 +4069,76 @@ app.post("/registros-semanales", async (req, res) => {
       "Salidas de Emergencia",
     ];
 
+    // =====================================================
+    // DEBEN SER EXACTAMENTE 7
+    // =====================================================
+
     if (condiciones.length !== condicionesPermitidas.length) {
       return res.status(400).json({
         success: false,
         error:
-          "El registro semanal debe contener exactamente las 7 condiciones del inmueble.",
+          "El registro semanal debe contener exactamente las 7 condiciones.",
       });
     }
 
-    for (const condicion of condiciones) {
-      if (!condicion.nombre) {
+    // =====================================================
+    // VALIDAR CADA CONDICIÓN
+    // =====================================================
+
+    for (const item of condiciones) {
+      if (!item.nombre) {
         return res.status(400).json({
           success: false,
           error: "Todas las condiciones deben tener nombre.",
         });
       }
 
-      if (!condicionesPermitidas.includes(condicion.nombre)) {
+      if (!condicionesPermitidas.includes(item.nombre)) {
         return res.status(400).json({
           success: false,
-          error: `Condición no permitida: ${condicion.nombre}`,
+          error: `Condición no permitida: ${item.nombre}`,
         });
       }
 
       if (
-        condicion.estado !== "bueno" &&
-        condicion.estado !== "malo"
+        item.estado !== "bueno" &&
+        item.estado !== "malo"
       ) {
         return res.status(400).json({
           success: false,
-          error: `Estado inválido para ${condicion.nombre}.`,
+          error: `Estado inválido para ${item.nombre}.`,
         });
       }
 
-      if (condicion.estado === "malo") {
+      if (item.estado === "malo") {
         if (
-          !condicion.condicion ||
-          !String(condicion.condicion).trim()
+          !item.condicion ||
+          !String(item.condicion).trim()
         ) {
           return res.status(400).json({
             success: false,
-            error: `Debes agregar la condición detectada para ${condicion.nombre}.`,
+            error: `Debes agregar la condición detectada para ${item.nombre}.`,
           });
         }
 
         if (
-          !condicion.accion_correctiva ||
-          !String(condicion.accion_correctiva).trim()
+          !item.accion_correctiva ||
+          !String(item.accion_correctiva).trim()
         ) {
           return res.status(400).json({
             success: false,
-            error: `Debes agregar la acción correctiva para ${condicion.nombre}.`,
+            error: `Debes agregar la acción correctiva para ${item.nombre}.`,
           });
         }
       }
     }
 
     // =====================================================
-    // VALIDAR QUE NO HAYA CONDICIONES DUPLICADAS
+    // VALIDAR DUPLICADOS
     // =====================================================
 
     const nombresRecibidos = condiciones.map(
-      (condicion) => condicion.nombre,
+      (item) => item.nombre,
     );
 
     const nombresUnicos = new Set(nombresRecibidos);
@@ -4133,7 +4147,7 @@ app.post("/registros-semanales", async (req, res) => {
       return res.status(400).json({
         success: false,
         error:
-          "Existen condiciones duplicadas o faltantes en el registro.",
+          "Existen condiciones duplicadas o faltantes.",
       });
     }
 
@@ -4207,18 +4221,18 @@ app.post("/registros-semanales", async (req, res) => {
     const inspeccion = inspeccionResult.rows[0];
 
     // =====================================================
-    // GUARDAR DETALLE
+    // GUARDAR LAS 7 CONDICIONES
     // =====================================================
 
-    for (const condicion of condiciones) {
+    for (const item of condiciones) {
       const condicionTexto =
-        condicion.estado === "malo"
-          ? String(condicion.condicion || "").trim()
+        item.estado === "malo"
+          ? String(item.condicion || "").trim()
           : null;
 
       const accionCorrectiva =
-        condicion.estado === "malo"
-          ? String(condicion.accion_correctiva || "").trim()
+        item.estado === "malo"
+          ? String(item.accion_correctiva || "").trim()
           : null;
 
       await client.query(
@@ -4240,8 +4254,8 @@ app.post("/registros-semanales", async (req, res) => {
         `,
         [
           inspeccion.id,
-          condicion.nombre,
-          condicion.estado,
+          item.nombre,
+          item.estado,
           condicionTexto,
           accionCorrectiva,
         ],
@@ -4249,29 +4263,31 @@ app.post("/registros-semanales", async (req, res) => {
     }
 
     // =====================================================
-    // CONFIRMAR TRANSACCIÓN
+    // CONFIRMAR
     // =====================================================
 
     await client.query("COMMIT");
 
-    // =====================================================
-    // RESPUESTA
-    // =====================================================
+    console.log(
+      "REGISTRO SEMANAL GUARDADO:",
+      inspeccion.id,
+    );
 
     return res.status(201).json({
       success: true,
-      message:
-        "Registro semanal guardado correctamente.",
+      message: "Registro semanal guardado correctamente.",
       registro: inspeccion,
     });
   } catch (error) {
-    try {
-      await client.query("ROLLBACK");
-    } catch (rollbackError) {
-      console.log(
-        "ERROR EN ROLLBACK:",
-        rollbackError.message,
-      );
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.log(
+          "ERROR HACIENDO ROLLBACK:",
+          rollbackError.message,
+        );
+      }
     }
 
     console.log(
@@ -4281,12 +4297,13 @@ app.post("/registros-semanales", async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      error:
-        "Error al guardar el registro semanal.",
+      error: "Error al guardar el registro semanal.",
       detalle: error.message,
     });
   } finally {
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
 });
 
