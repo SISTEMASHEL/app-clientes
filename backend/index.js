@@ -4327,30 +4327,37 @@ app.post("/registros-semanales", async (req, res) => {
           : null;
 
       await client.query(
-        `
-        INSERT INTO inspecciones_semanales_detalle (
-          inspeccion_id,
-          nombre_condicion,
-          estado,
-          condicion,
-          accion_correctiva
-        )
-        VALUES (
-          $1,
-          $2,
-          $3,
-          $4,
-          $5
-        )
-        `,
-        [
-          inspeccion.id,
-          item.nombre,
-          item.estado,
-          condicionTexto,
-          accionCorrectiva,
-        ],
-      );
+  `
+  INSERT INTO inspecciones_semanales_detalle
+  (
+    inspeccion_id,
+    seccion,
+    nombre_condicion,
+    estado,
+    condicion,
+    accion_correctiva
+  )
+  VALUES
+  (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6
+  )
+  `,
+  [
+    inspeccion.id,
+    "condiciones_inmueble",
+    nombre,
+    estado,
+    estado === "malo" ? condicion : null,
+    estado === "malo"
+      ? accion_correctiva
+      : null,
+  ],
+);
     }
 
     // =====================================================
@@ -4397,6 +4404,473 @@ app.post("/registros-semanales", async (req, res) => {
     }
   }
 });
+
+// =====================================================
+// GUARDAR PROTECCIÓN CONTRA INCENDIOS
+// INSPECCIÓN SEMANAL
+// =====================================================
+
+app.post(
+  "/registros-semanales/incendios",
+  async (req, res) => {
+    let client;
+
+    try {
+      client = await db.connect();
+
+      const {
+        cliente_id,
+        usuario_id,
+        tipo_registro,
+        condiciones,
+      } = req.body;
+
+      console.log(
+        "========================================",
+      );
+
+      console.log(
+        "POST /registros-semanales/incendios",
+      );
+
+      console.log(
+        "BODY:",
+        req.body,
+      );
+
+      console.log(
+        "========================================",
+      );
+
+      // =====================================================
+      // VALIDAR CLIENTE
+      // =====================================================
+
+      if (!cliente_id) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "cliente_id es requerido.",
+        });
+      }
+
+      // =====================================================
+      // VALIDAR TIPO
+      // =====================================================
+
+      if (
+        tipo_registro !==
+        "proteccion_incendios"
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "El tipo_registro debe ser proteccion_incendios.",
+        });
+      }
+
+      // =====================================================
+      // VALIDAR ARRAY
+      // =====================================================
+
+      if (!Array.isArray(condiciones)) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "condiciones debe ser un arreglo.",
+        });
+      }
+
+      // =====================================================
+      // ELEMENTOS OBLIGATORIOS
+      // =====================================================
+
+      const condicionesEsperadas = [
+        "Gabinete",
+        "Señalización",
+        "Extintores",
+        "Estrobos",
+        "Hidrantes",
+        "Rutas de Evacuación",
+      ];
+
+      if (
+        condiciones.length !==
+        condicionesEsperadas.length
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Deben enviarse exactamente 6 registros de Protección contra Incendios.",
+        });
+      }
+
+      // =====================================================
+      // VALIDAR NOMBRES
+      // =====================================================
+
+      const nombresRecibidos =
+        condiciones.map(
+          (item) => item.nombre,
+        );
+
+      const faltantes =
+        condicionesEsperadas.filter(
+          (nombre) =>
+            !nombresRecibidos.includes(
+              nombre,
+            ),
+        );
+
+      if (faltantes.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error:
+            `Faltan las siguientes verificaciones: ${faltantes.join(
+              ", ",
+            )}`,
+        });
+      }
+
+      // =====================================================
+      // VALIDAR DUPLICADOS
+      // =====================================================
+
+      const nombresUnicos =
+        new Set(nombresRecibidos);
+
+      if (
+        nombresUnicos.size !==
+        condicionesEsperadas.length
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Existen verificaciones duplicadas.",
+        });
+      }
+
+      // =====================================================
+      // VALIDAR CONTENIDO DE CADA REGISTRO
+      // =====================================================
+
+      for (const item of condiciones) {
+        const {
+          nombre,
+          estado,
+          condicion,
+          accion_correctiva,
+        } = item;
+
+        if (
+          !["bueno", "malo"].includes(
+            estado,
+          )
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              `El estado de "${nombre}" debe ser bueno o malo.`,
+          });
+        }
+
+        if (estado === "malo") {
+          if (
+            !condicion ||
+            !String(
+              condicion,
+            ).trim()
+          ) {
+            return res.status(400).json({
+              success: false,
+              error:
+                `"${nombre}" está marcado como Malo y requiere Condición.`,
+            });
+          }
+
+          if (
+            !accion_correctiva ||
+            !String(
+              accion_correctiva,
+            ).trim()
+          ) {
+            return res.status(400).json({
+              success: false,
+              error:
+                `"${nombre}" está marcado como Malo y requiere Acción correctiva.`,
+            });
+          }
+        }
+      }
+
+      // =====================================================
+      // VERIFICAR CLIENTE
+      // =====================================================
+
+      const clienteResult =
+        await client.query(
+          `
+          SELECT
+            id,
+            nombre_empresa
+          FROM clientes
+          WHERE id = $1
+          `,
+          [cliente_id],
+        );
+
+      if (
+        clienteResult.rows.length === 0
+      ) {
+        return res.status(404).json({
+          success: false,
+          error:
+            "El cliente indicado no existe.",
+        });
+      }
+
+      const cliente =
+        clienteResult.rows[0];
+
+      // =====================================================
+      // INICIAR TRANSACCIÓN
+      // =====================================================
+
+      await client.query("BEGIN");
+
+      // =====================================================
+      // BUSCAR INSPECCIÓN DE HOY
+      //
+      // SI YA SE GUARDÓ CONDICIONES DEL INMUEBLE
+      // REUTILIZAMOS LA MISMA INSPECCIÓN
+      // =====================================================
+
+      const inspeccionExistente =
+        await client.query(
+          `
+          SELECT
+            id,
+            cliente_id,
+            usuario_id,
+            nombre_empresa,
+            fecha_registro,
+            hora_registro,
+            created_at
+
+          FROM inspecciones_semanales
+
+          WHERE cliente_id = $1
+            AND fecha_registro = CURRENT_DATE
+
+          ORDER BY id DESC
+
+          LIMIT 1
+          `,
+          [cliente_id],
+        );
+
+      let inspeccion;
+
+      if (
+        inspeccionExistente.rows.length >
+        0
+      ) {
+        inspeccion =
+          inspeccionExistente.rows[0];
+
+        console.log(
+          "REUTILIZANDO INSPECCIÓN:",
+          inspeccion.id,
+        );
+      } else {
+        const nuevaInspeccion =
+          await client.query(
+            `
+            INSERT INTO inspecciones_semanales
+            (
+              cliente_id,
+              usuario_id,
+              nombre_empresa,
+              fecha_registro,
+              hora_registro
+            )
+            VALUES
+            (
+              $1,
+              $2,
+              $3,
+              CURRENT_DATE,
+              CURRENT_TIME
+            )
+
+            RETURNING
+              id,
+              cliente_id,
+              usuario_id,
+              nombre_empresa,
+              fecha_registro,
+              hora_registro,
+              created_at
+            `,
+            [
+              cliente_id,
+              usuario_id || null,
+              cliente.nombre_empresa,
+            ],
+          );
+
+        inspeccion =
+          nuevaInspeccion.rows[0];
+
+        console.log(
+          "NUEVA INSPECCIÓN:",
+          inspeccion.id,
+        );
+      }
+
+      // =====================================================
+      // ELIMINAR REGISTROS ANTERIORES DE INCENDIOS
+      // PARA ESA MISMA INSPECCIÓN
+      //
+      // ESTO PERMITE CORREGIR / VOLVER A GUARDAR
+      // SIN DUPLICAR LOS 6 REGISTROS
+      // =====================================================
+
+      await client.query(
+        `
+        DELETE FROM inspecciones_semanales_detalle
+
+        WHERE inspeccion_id = $1
+          AND seccion = $2
+        `,
+        [
+          inspeccion.id,
+          "proteccion_incendios",
+        ],
+      );
+
+      // =====================================================
+      // INSERTAR LOS 6 REGISTROS
+      // =====================================================
+
+      for (const item of condiciones) {
+        const {
+          nombre,
+          estado,
+          condicion,
+          accion_correctiva,
+        } = item;
+
+        await client.query(
+          `
+          INSERT INTO inspecciones_semanales_detalle
+          (
+            inspeccion_id,
+            seccion,
+            nombre_condicion,
+            estado,
+            condicion,
+            accion_correctiva
+          )
+          VALUES
+          (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6
+          )
+          `,
+          [
+            inspeccion.id,
+            "proteccion_incendios",
+            nombre,
+            estado,
+            estado === "malo"
+              ? String(
+                  condicion,
+                ).trim()
+              : null,
+            estado === "malo"
+              ? String(
+                  accion_correctiva,
+                ).trim()
+              : null,
+          ],
+        );
+      }
+
+      // =====================================================
+      // CONFIRMAR
+      // =====================================================
+
+      await client.query("COMMIT");
+
+      console.log(
+        "PROTECCIÓN CONTRA INCENDIOS GUARDADA",
+      );
+
+      console.log(
+        "INSPECCIÓN:",
+        inspeccion.id,
+      );
+
+      return res
+        .status(201)
+        .json({
+          success: true,
+
+          message:
+            "Protección contra Incendios guardada correctamente.",
+
+          registro: inspeccion,
+        });
+    } catch (error) {
+      if (client) {
+        try {
+          await client.query(
+            "ROLLBACK",
+          );
+        } catch (
+          rollbackError
+        ) {
+          console.log(
+            "ERROR HACIENDO ROLLBACK:",
+            rollbackError.message,
+          );
+        }
+      }
+
+      console.error(
+        "========================================",
+      );
+
+      console.error(
+        "ERROR POST /registros-semanales/incendios:",
+        error,
+      );
+
+      console.error(
+        "========================================",
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        error:
+          "Error al guardar Protección contra Incendios.",
+
+        detalle:
+          error.message,
+      });
+    } finally {
+      if (client) {
+        client.release();
+      }
+    }
+  },
+);
 
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
