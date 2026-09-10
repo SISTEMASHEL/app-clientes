@@ -3027,12 +3027,21 @@ app.use((error, req, res, next) => {
 
 // =====================================================
 // HISTÓRICO DE REGISTROS EPP
-// FUNCIÓN PARA CONSTRUIR SNAPSHOT DEL CLIENTE
+//
+// COMPARACIÓN GLOBAL:
+//
+// - TODAS LAS ÁREAS
+// - TODOS LOS PUESTOS
+//
+// RESULTADO:
+//
+// 1. EPP IDÉNTICOS
+// 2. EPP DIFERENTES
 // =====================================================
 
 const construirSnapshotEpp = async (clienteId) => {
   // ===================================================
-  // 1. OBTENER CLIENTE
+  // 1. CLIENTE
   // ===================================================
 
   const clienteResult = await db.query(
@@ -3047,13 +3056,16 @@ const construirSnapshotEpp = async (clienteId) => {
   );
 
   if (clienteResult.rows.length === 0) {
-    throw new Error("El cliente indicado no existe");
+    throw new Error(
+      "El cliente indicado no existe",
+    );
   }
 
-  const cliente = clienteResult.rows[0];
+  const cliente =
+    clienteResult.rows[0];
 
   // ===================================================
-  // 2. OBTENER ÁREAS
+  // 2. ÁREAS
   // ===================================================
 
   const areasResult = await db.query(
@@ -3070,7 +3082,7 @@ const construirSnapshotEpp = async (clienteId) => {
   );
 
   // ===================================================
-  // 3. OBTENER PUESTOS DEL CLIENTE
+  // 3. PUESTOS
   // ===================================================
 
   const puestosResult = await db.query(
@@ -3080,7 +3092,9 @@ const construirSnapshotEpp = async (clienteId) => {
       p.area_id,
       p.puesto,
       p.numero_usuarios,
-      p.descripcion
+      p.descripcion,
+      a.nombre_area
+
     FROM puestos_trabajo p
 
     INNER JOIN areas_trabajo a
@@ -3096,7 +3110,7 @@ const construirSnapshotEpp = async (clienteId) => {
   );
 
   // ===================================================
-  // 4. OBTENER INVENTARIO EPP DEL CLIENTE
+  // 4. INVENTARIO EPP
   // ===================================================
 
   const inventarioResult = await db.query(
@@ -3107,13 +3121,24 @@ const construirSnapshotEpp = async (clienteId) => {
       i.nombre_producto,
       i.marca,
       i.descripcion,
+      i.tipo_producto,
       i.cantidad_total,
       i.area_id,
       i.puesto_id,
       i.ficha_tecnica,
-      i.certificado
+      i.certificado,
+
+      a.nombre_area,
+
+      p.puesto AS puesto_nombre
 
     FROM inventario i
+
+    INNER JOIN areas_trabajo a
+      ON a.id = i.area_id
+
+    INNER JOIN puestos_trabajo p
+      ON p.id = i.puesto_id
 
     WHERE i.cliente_id = $1
 
@@ -3123,28 +3148,41 @@ const construirSnapshotEpp = async (clienteId) => {
       )
 
     ORDER BY
-      i.area_id,
-      i.puesto_id,
+      a.nombre_area,
+      p.puesto,
       i.nombre_producto
     `,
     [clienteId],
   );
 
-  const areas = areasResult.rows;
-  const puestos = puestosResult.rows;
-  const inventario = inventarioResult.rows;
+  const areas =
+    areasResult.rows;
+
+  const puestos =
+    puestosResult.rows;
+
+  const inventario =
+    inventarioResult.rows;
 
   // ===================================================
-  // FUNCIÓN PARA GENERAR UNA CLAVE COMPARABLE
+  // 5. CLAVE ÚNICA PARA COMPARACIÓN
   // ===================================================
 
-  const obtenerClaveEpp = (producto) => {
+  const obtenerClaveEpp = (
+    producto,
+  ) => {
     if (
-      producto.clave_producto !== null &&
-      producto.clave_producto !== undefined &&
-      String(producto.clave_producto).trim() !== ""
+      producto.clave_producto !==
+        null &&
+      producto.clave_producto !==
+        undefined &&
+      String(
+        producto.clave_producto,
+      ).trim() !== ""
     ) {
-      return String(producto.clave_producto)
+      return String(
+        producto.clave_producto,
+      )
         .trim()
         .toLowerCase();
     }
@@ -3155,259 +3193,354 @@ const construirSnapshotEpp = async (clienteId) => {
   };
 
   // ===================================================
-  // 5. CONSTRUIR ÁREAS
+  // 6. CREAR ESTRUCTURA DE ÁREAS Y PUESTOS
   // ===================================================
 
-  const areasProcesadas = areas.map((area) => {
-    const puestosArea = puestos.filter(
-      (puesto) =>
-        Number(puesto.area_id) ===
-        Number(area.id),
-    );
+  const areasProcesadas =
+    areas.map((area) => {
+      const puestosArea =
+        puestos
+          .filter(
+            (puesto) =>
+              Number(
+                puesto.area_id,
+              ) ===
+              Number(
+                area.id,
+              ),
+          )
+          .map((puesto) => {
+            const productos =
+              inventario.filter(
+                (producto) =>
+                  Number(
+                    producto.puesto_id,
+                  ) ===
+                  Number(
+                    puesto.id,
+                  ),
+              );
 
-    const inventarioArea = inventario.filter(
-      (producto) =>
-        Number(producto.area_id) ===
-        Number(area.id),
-    );
+            return {
+              puesto_id:
+                puesto.id,
 
-    // ===============================================
-    // PUESTOS + EPP
-    // ===============================================
+              puesto:
+                puesto.puesto,
 
-    const puestosProcesados = puestosArea.map(
-      (puesto) => {
-        const productosPuesto =
-          inventarioArea.filter(
-            (producto) =>
-              Number(producto.puesto_id) ===
-              Number(puesto.id),
+              numero_usuarios:
+                puesto.numero_usuarios,
+
+              descripcion:
+                puesto.descripcion,
+
+              epp:
+                productos.map(
+                  (producto) => ({
+                    id:
+                      producto.id,
+
+                    clave_producto:
+                      producto.clave_producto,
+
+                    nombre_producto:
+                      producto.nombre_producto,
+
+                    marca:
+                      producto.marca,
+
+                    descripcion:
+                      producto.descripcion,
+
+                    cantidad_total:
+                      producto.cantidad_total,
+
+                    ficha_tecnica:
+                      producto.ficha_tecnica,
+
+                    certificado:
+                      producto.certificado,
+                  }),
+                ),
+            };
+          });
+
+      return {
+        area_id:
+          area.id,
+
+        nombre_area:
+          area.nombre_area,
+
+        descripcion:
+          area.descripcion,
+
+        puestos:
+          puestosArea,
+      };
+    });
+
+  // ===================================================
+  // 7. TODOS LOS PUESTOS DEL CLIENTE
+  //
+  // Aquí dejamos de comparar área por área.
+  // Ahora TODOS los puestos participan.
+  // ===================================================
+
+  const puestosGlobales = [];
+
+  areasProcesadas.forEach(
+    (area) => {
+      area.puestos.forEach(
+        (puesto) => {
+          puestosGlobales.push({
+            area_id:
+              area.area_id,
+
+            nombre_area:
+              area.nombre_area,
+
+            puesto_id:
+              puesto.puesto_id,
+
+            puesto:
+              puesto.puesto,
+
+            epp:
+              puesto.epp,
+          });
+        },
+      );
+    },
+  );
+
+  // ===================================================
+  // 8. MAPA GLOBAL DE TODOS LOS EPP
+  // ===================================================
+
+  const mapaGlobal =
+    new Map();
+
+  inventario.forEach(
+    (producto) => {
+      const clave =
+        obtenerClaveEpp(
+          producto,
+        );
+
+      if (
+        !mapaGlobal.has(
+          clave,
+        )
+      ) {
+        mapaGlobal.set(
+          clave,
+          {
+            clave_comparacion:
+              clave,
+
+            clave_producto:
+              producto.clave_producto,
+
+            nombre_producto:
+              producto.nombre_producto,
+
+            marca:
+              producto.marca,
+
+            ubicaciones: [],
+          },
+        );
+      }
+
+      const registro =
+        mapaGlobal.get(
+          clave,
+        );
+
+      // Evitar duplicar exactamente
+      // área + puesto para el mismo EPP.
+
+      const yaExiste =
+        registro.ubicaciones.some(
+          (ubicacion) =>
+            Number(
+              ubicacion.area_id,
+            ) ===
+              Number(
+                producto.area_id,
+              ) &&
+            Number(
+              ubicacion.puesto_id,
+            ) ===
+              Number(
+                producto.puesto_id,
+              ),
+        );
+
+      if (!yaExiste) {
+        registro.ubicaciones.push({
+          area_id:
+            producto.area_id,
+
+          nombre_area:
+            producto.nombre_area,
+
+          puesto_id:
+            producto.puesto_id,
+
+          puesto:
+            producto.puesto_nombre,
+        });
+      }
+    },
+  );
+
+  // ===================================================
+  // 9. TOTAL DE PUESTOS A COMPARAR
+  // ===================================================
+
+  const totalPuestos =
+    puestosGlobales.length;
+
+  // ===================================================
+  // 10. EPP IDÉNTICOS
+  //
+  // Debe aparecer en TODOS los puestos del cliente.
+  // ===================================================
+
+  const eppIdenticos = [];
+
+  // ===================================================
+  // 11. EPP DIFERENTES
+  //
+  // Aparecen solamente en determinados puestos.
+  // ===================================================
+
+  const eppDiferentes = [];
+
+  mapaGlobal.forEach(
+    (producto) => {
+      const puestosConProducto =
+        new Set(
+          producto.ubicaciones.map(
+            (ubicacion) =>
+              String(
+                ubicacion.puesto_id,
+              ),
+          ),
+        );
+
+      // ===============================================
+      // IDÉNTICO
+      // Está presente en TODOS los puestos
+      // ===============================================
+
+      if (
+        totalPuestos > 0 &&
+        puestosConProducto.size ===
+          totalPuestos
+      ) {
+        eppIdenticos.push({
+          clave_producto:
+            producto.clave_producto,
+
+          nombre_producto:
+            producto.nombre_producto,
+
+          marca:
+            producto.marca,
+
+          ubicaciones:
+            producto.ubicaciones,
+        });
+      }
+
+      // ===============================================
+      // DIFERENTE
+      // Solo está presente en algunos puestos
+      // ===============================================
+
+      else {
+        eppDiferentes.push({
+          clave_producto:
+            producto.clave_producto,
+
+          nombre_producto:
+            producto.nombre_producto,
+
+          marca:
+            producto.marca,
+
+          ubicaciones:
+            producto.ubicaciones,
+        });
+      }
+    },
+  );
+
+  // ===================================================
+  // 12. MATRIZ COMPLETA
+  //
+  // Esta parte nos será útil para mostrar después
+  // columnas por área / puesto.
+  // ===================================================
+
+  const matrizComparacion =
+    Array.from(
+      mapaGlobal.values(),
+    ).map(
+      (producto) => {
+        const presencia =
+          puestosGlobales.map(
+            (puesto) => {
+              const existe =
+                producto.ubicaciones.some(
+                  (ubicacion) =>
+                    Number(
+                      ubicacion.puesto_id,
+                    ) ===
+                    Number(
+                      puesto.puesto_id,
+                    ),
+                );
+
+              return {
+                area_id:
+                  puesto.area_id,
+
+                nombre_area:
+                  puesto.nombre_area,
+
+                puesto_id:
+                  puesto.puesto_id,
+
+                puesto:
+                  puesto.puesto,
+
+                tiene_epp:
+                  existe,
+              };
+            },
           );
 
         return {
-          puesto_id: puesto.id,
-          puesto: puesto.puesto,
-          numero_usuarios:
-            puesto.numero_usuarios,
-          descripcion:
-            puesto.descripcion,
+          clave_producto:
+            producto.clave_producto,
 
-          epp: productosPuesto.map(
-            (producto) => ({
-              id: producto.id,
-              clave_producto:
-                producto.clave_producto,
-              nombre_producto:
-                producto.nombre_producto,
-              marca:
-                producto.marca,
-              descripcion:
-                producto.descripcion,
-              cantidad_total:
-                producto.cantidad_total,
-              ficha_tecnica:
-                producto.ficha_tecnica,
-              certificado:
-                producto.certificado,
-            }),
-          ),
+          nombre_producto:
+            producto.nombre_producto,
+
+          marca:
+            producto.marca,
+
+          presencia,
         };
       },
     );
 
-    // ===============================================
-    // TODOS LOS EPP DISTINTOS DEL ÁREA
-    // ===============================================
-
-    const mapaProductosArea = new Map();
-
-    inventarioArea.forEach((producto) => {
-      const clave =
-        obtenerClaveEpp(producto);
-
-      if (!mapaProductosArea.has(clave)) {
-        mapaProductosArea.set(
-          clave,
-          producto,
-        );
-      }
-    });
-
-    const eppTotalArea = Array.from(
-      mapaProductosArea.values(),
-    ).map((producto) => ({
-      clave_producto:
-        producto.clave_producto,
-      nombre_producto:
-        producto.nombre_producto,
-      marca:
-        producto.marca,
-    }));
-
-    // ===============================================
-    // EPP COMÚN
-    //
-    // Debe aparecer en TODOS los puestos del área
-    // ===============================================
-
-    let clavesComunes = [];
-
-    if (puestosProcesados.length > 0) {
-      const primerPuesto =
-        puestosProcesados[0];
-
-      clavesComunes =
-        primerPuesto.epp.map(
-          obtenerClaveEpp,
-        );
-
-      for (
-        let i = 1;
-        i < puestosProcesados.length;
-        i++
-      ) {
-        const clavesPuesto =
-          new Set(
-            puestosProcesados[i].epp.map(
-              obtenerClaveEpp,
-            ),
-          );
-
-        clavesComunes =
-          clavesComunes.filter(
-            (clave) =>
-              clavesPuesto.has(clave),
-          );
-      }
-    }
-
-    clavesComunes = [
-      ...new Set(clavesComunes),
-    ];
-
-    const eppComun =
-      clavesComunes
-        .map((clave) => {
-          const producto =
-            inventarioArea.find(
-              (item) =>
-                obtenerClaveEpp(item) ===
-                clave,
-            );
-
-          if (!producto) {
-            return null;
-          }
-
-          return {
-            clave_producto:
-              producto.clave_producto,
-            nombre_producto:
-              producto.nombre_producto,
-            marca:
-              producto.marca,
-          };
-        })
-        .filter(Boolean);
-
-    // ===============================================
-    // EPP ESPECÍFICO POR PUESTO
-    //
-    // Todo lo que NO forma parte del EPP común
-    // ===============================================
-
-    const comunesSet =
-      new Set(clavesComunes);
-
-    const eppEspecificoPuesto =
-      puestosProcesados.map(
-        (puesto) => ({
-          puesto_id:
-            puesto.puesto_id,
-
-          puesto:
-            puesto.puesto,
-
-          epp:
-            puesto.epp.filter(
-              (producto) =>
-                !comunesSet.has(
-                  obtenerClaveEpp(producto),
-                ),
-            ),
-        }),
-      );
-
-    return {
-      area_id:
-        area.id,
-
-      nombre_area:
-        area.nombre_area,
-
-      descripcion:
-        area.descripcion,
-
-      puestos:
-        puestosProcesados,
-
-      epp_total_area:
-        eppTotalArea,
-
-      epp_comun:
-        eppComun,
-
-      epp_especifico_puesto:
-        eppEspecificoPuesto,
-
-      // Lo calculamos después,
-      // comparándolo contra las demás áreas.
-      epp_exclusivo_area: [],
-    };
-  });
-
   // ===================================================
-  // 6. CALCULAR EPP EXCLUSIVO DE CADA ÁREA
-  //
-  // Un EPP es exclusivo si no aparece
-  // en ninguna otra área del cliente.
-  // ===================================================
-
-  for (const area of areasProcesadas) {
-    const clavesOtrasAreas =
-      new Set();
-
-    for (
-      const otraArea
-      of areasProcesadas
-    ) {
-      if (
-        Number(otraArea.area_id) ===
-        Number(area.area_id)
-      ) {
-        continue;
-      }
-
-      otraArea.epp_total_area.forEach(
-        (producto) => {
-          clavesOtrasAreas.add(
-            obtenerClaveEpp(producto),
-          );
-        },
-      );
-    }
-
-    area.epp_exclusivo_area =
-      area.epp_total_area.filter(
-        (producto) =>
-          !clavesOtrasAreas.has(
-            obtenerClaveEpp(producto),
-          ),
-      );
-  }
-
-  // ===================================================
-  // 7. RESULTADO FINAL
+  // 13. RESULTADO FINAL
   // ===================================================
 
   return {
@@ -3421,6 +3554,23 @@ const construirSnapshotEpp = async (clienteId) => {
 
     areas:
       areasProcesadas,
+
+    comparacion: {
+      total_areas:
+        areasProcesadas.length,
+
+      total_puestos:
+        totalPuestos,
+
+      epp_identicos:
+        eppIdenticos,
+
+      epp_diferentes:
+        eppDiferentes,
+
+      matriz:
+        matrizComparacion,
+    },
   };
 };
 
