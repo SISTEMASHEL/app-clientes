@@ -1,25 +1,116 @@
 // ------------------- CONFIGURACIONES GENERALES -------------------
 require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const { Pool } = require("pg");
 const path = require("path");
 const multer = require("multer");
-const fs = require("fs"); // ✅ AÑADIDO
+const fs = require("fs");
 
 const app = express();
 
 const PORT = process.env.PORT || 3001;
 
-// CORS
+// =====================================================
+// CORS GLOBAL - WEB / ANDROID / IOS
+// =====================================================
+
+const corsOptions = {
+  origin: "*",
+
+  methods: [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+  ],
+
+  allowedHeaders: [
+    "Origin",
+    "X-Requested-With",
+    "Content-Type",
+    "Accept",
+    "Authorization",
+  ],
+
+  optionsSuccessStatus: 204,
+};
+
+// =====================================================
+// MIDDLEWARE MANUAL CORS
+// DEBE IR ANTES DE TODAS LAS RUTAS
+// =====================================================
+
+app.use((req, res, next) => {
+  console.log(
+    "REQUEST:",
+    req.method,
+    req.originalUrl,
+  );
+
+  res.setHeader(
+    "Access-Control-Allow-Origin",
+    "*",
+  );
+
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  );
+
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization",
+  );
+
+  // ===================================================
+  // RESPONDER PREFLIGHT DEL NAVEGADOR
+  // ===================================================
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+
+  next();
+});
+
+// =====================================================
+// PAQUETE CORS
+// =====================================================
+
+app.use(cors(corsOptions));
+
+// =====================================================
+// BODY PARSERS
+// =====================================================
+
 app.use(
-  cors({
-    origin: "*",
+  bodyParser.json({
+    limit: "50mb",
   }),
 );
 
-app.use(bodyParser.json());
+app.use(
+  bodyParser.urlencoded({
+    extended: true,
+    limit: "50mb",
+  }),
+);
+
+// =====================================================
+// TEST CORS
+// =====================================================
+
+app.get("/test-cors", (req, res) => {
+  res.json({
+    success: true,
+    message: "CORS funcionando correctamente",
+  });
+});
 
 // ------------------- POSTGRESQL POOL -------------------
 const db = new Pool({
