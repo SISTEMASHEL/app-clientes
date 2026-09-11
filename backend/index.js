@@ -4293,6 +4293,163 @@ app.post(
   },
 );
 
+// =====================================================
+// OBTENER REGISTROS SEMANALES POR CLIENTE Y FECHA
+// =====================================================
+
+app.get(
+  "/registros-semanales/:clienteId/:fecha",
+  async (req, res) => {
+    try {
+      const { clienteId, fecha } = req.params;
+
+      // =================================================
+      // VALIDACIONES
+      // =================================================
+
+      if (!clienteId) {
+        return res.status(400).json({
+          success: false,
+          error: "clienteId es requerido.",
+        });
+      }
+
+      if (!fecha) {
+        return res.status(400).json({
+          success: false,
+          error: "La fecha es requerida.",
+        });
+      }
+
+      // Validación básica YYYY-MM-DD
+      const formatoFecha = /^\d{4}-\d{2}-\d{2}$/;
+
+      if (!formatoFecha.test(fecha)) {
+        return res.status(400).json({
+          success: false,
+          error: "La fecha debe tener formato YYYY-MM-DD.",
+        });
+      }
+
+      // =================================================
+      // BUSCAR INSPECCIÓN DEL CLIENTE EN ESA FECHA
+      // =================================================
+
+      const inspeccionResult = await db.query(
+        `
+        SELECT
+          id,
+          cliente_id,
+          usuario_id,
+          nombre_empresa,
+          fecha_registro,
+          hora_registro,
+          created_at
+        FROM inspecciones_semanales
+        WHERE cliente_id = $1
+          AND fecha_registro = $2
+        ORDER BY id DESC
+        LIMIT 1
+        `,
+        [clienteId, fecha],
+      );
+
+      // =================================================
+      // SI NO EXISTE REGISTRO
+      // =================================================
+
+      if (inspeccionResult.rows.length === 0) {
+        return res.json({
+          success: true,
+          encontrado: false,
+          fecha,
+          inspeccion: null,
+          secciones: {
+            condiciones_inmueble: [],
+            proteccion_incendios: [],
+            ventilacion_iluminacion: [],
+          },
+        });
+      }
+
+      const inspeccion = inspeccionResult.rows[0];
+
+      // =================================================
+      // OBTENER DETALLE DE LA INSPECCIÓN
+      // =================================================
+
+      const detalleResult = await db.query(
+        `
+        SELECT
+          id,
+          inspeccion_id,
+          seccion,
+          nombre_condicion,
+          estado,
+          condicion,
+          accion_correctiva,
+          created_at
+        FROM inspecciones_semanales_detalle
+        WHERE inspeccion_id = $1
+        ORDER BY
+          CASE seccion
+            WHEN 'condiciones_inmueble' THEN 1
+            WHEN 'proteccion_incendios' THEN 2
+            WHEN 'ventilacion_iluminacion' THEN 3
+            ELSE 4
+          END,
+          id ASC
+        `,
+        [inspeccion.id],
+      );
+
+      const detalles = detalleResult.rows;
+
+      // =================================================
+      // AGRUPAR POR SECCIÓN
+      // =================================================
+
+      const secciones = {
+        condiciones_inmueble: detalles.filter(
+          (item) => item.seccion === "condiciones_inmueble",
+        ),
+
+        proteccion_incendios: detalles.filter(
+          (item) => item.seccion === "proteccion_incendios",
+        ),
+
+        ventilacion_iluminacion: detalles.filter(
+          (item) => item.seccion === "ventilacion_iluminacion",
+        ),
+      };
+
+      // =================================================
+      // RESPUESTA
+      // =================================================
+
+      return res.json({
+        success: true,
+        encontrado: true,
+        fecha,
+        inspeccion,
+        secciones,
+      });
+    } catch (error) {
+      console.error(
+        "ERROR CONSULTANDO REGISTROS SEMANALES POR FECHA:",
+        error,
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "Error al consultar los registros semanales de la fecha seleccionada.",
+        detalle: error.message,
+      });
+    }
+  },
+);
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
