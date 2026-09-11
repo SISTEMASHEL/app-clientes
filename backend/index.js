@@ -4543,6 +4543,126 @@ app.get(
   },
 );
 
+// =====================================================
+// SEGUIMIENTO DE CONDICIONES INSEGURAS
+// =====================================================
+
+app.get("/seguimiento-condiciones/:clienteId", async (req, res) => {
+  try {
+    const { clienteId } = req.params;
+
+    // =====================================================
+    // VALIDAR CLIENTE
+    // =====================================================
+
+    if (!clienteId || isNaN(Number(clienteId))) {
+      return res.status(400).json({
+        success: false,
+        error: "Cliente inválido.",
+      });
+    }
+
+    // =====================================================
+    // CONSULTAR REGISTROS EN ESTADO MALO
+    // =====================================================
+
+    const resultado = await db.query(
+      `
+      SELECT
+        d.id,
+        d.inspeccion_id,
+        d.seccion,
+        d.nombre_condicion,
+        d.estado,
+        d.condicion,
+        d.accion_correctiva,
+        d.accion_corregida,
+        d.fecha_correccion,
+
+        i.cliente_id,
+        i.usuario_id,
+        i.nombre_empresa,
+        i.fecha_registro,
+        i.hora_registro,
+        i.created_at,
+
+        GREATEST(
+          CURRENT_DATE - i.fecha_registro,
+          0
+        ) AS dias_transcurridos
+
+      FROM inspecciones_semanales_detalle d
+
+      INNER JOIN inspecciones_semanales i
+        ON i.id = d.inspeccion_id
+
+      WHERE i.cliente_id = $1
+        AND LOWER(d.estado) = 'malo'
+
+      ORDER BY
+        d.accion_corregida ASC,
+        i.fecha_registro ASC,
+        d.id ASC
+      `,
+      [clienteId],
+    );
+
+    // =====================================================
+    // AGRUPAR POR SECCIÓN
+    // =====================================================
+
+    const registros = resultado.rows;
+
+    const secciones = {
+      condiciones_inmueble: registros.filter(
+        (item) => item.seccion === "condiciones_inmueble",
+      ),
+
+      proteccion_incendios: registros.filter(
+        (item) => item.seccion === "proteccion_incendios",
+      ),
+
+      ventilacion_iluminacion: registros.filter(
+        (item) => item.seccion === "ventilacion_iluminacion",
+      ),
+    };
+
+    // =====================================================
+    // RESPUESTA
+    // =====================================================
+
+    return res.json({
+      success: true,
+
+      total: registros.length,
+
+      pendientes: registros.filter(
+        (item) => item.accion_corregida === false,
+      ).length,
+
+      corregidos: registros.filter(
+        (item) => item.accion_corregida === true,
+      ).length,
+
+      registros,
+
+      secciones,
+    });
+  } catch (error) {
+    console.log(
+      "ERROR CONSULTANDO SEGUIMIENTO DE CONDICIONES:",
+      error,
+    );
+
+    return res.status(500).json({
+      success: false,
+      error:
+        "No fue posible consultar el seguimiento de condiciones inseguras.",
+      detalle: error.message,
+    });
+  }
+});
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
