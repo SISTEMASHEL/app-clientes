@@ -4321,7 +4321,6 @@ app.get(
         });
       }
 
-      // Validación básica YYYY-MM-DD
       const formatoFecha = /^\d{4}-\d{2}-\d{2}$/;
 
       if (!formatoFecha.test(fecha)) {
@@ -4332,10 +4331,34 @@ app.get(
       }
 
       // =================================================
-      // BUSCAR INSPECCIÓN DEL CLIENTE EN ESA FECHA
+      // VERIFICAR CLIENTE
       // =================================================
 
-      const inspeccionResult = await db.query(
+      const clienteResult = await db.query(
+        `
+        SELECT
+          id,
+          nombre_empresa
+        FROM clientes
+        WHERE id = $1
+        `,
+        [clienteId],
+      );
+
+      if (clienteResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: "Cliente no encontrado.",
+        });
+      }
+
+      const cliente = clienteResult.rows[0];
+
+      // =================================================
+      // BUSCAR TODAS LAS INSPECCIONES DE ESA FECHA
+      // =================================================
+
+      const inspeccionesResult = await db.query(
         `
         SELECT
           id,
@@ -4347,23 +4370,30 @@ app.get(
           created_at
         FROM inspecciones_semanales
         WHERE cliente_id = $1
-          AND fecha_registro = $2
-        ORDER BY id DESC
-        LIMIT 1
+          AND fecha_registro = $2::date
+        ORDER BY id ASC
         `,
         [clienteId, fecha],
       );
 
       // =================================================
-      // SI NO EXISTE REGISTRO
+      // NO HAY REGISTROS
       // =================================================
 
-      if (inspeccionResult.rows.length === 0) {
+      if (inspeccionesResult.rows.length === 0) {
         return res.json({
           success: true,
           encontrado: false,
+
           fecha,
-          inspeccion: null,
+
+          cliente: {
+            id: cliente.id,
+            nombre_empresa: cliente.nombre_empresa,
+          },
+
+          inspecciones: [],
+
           secciones: {
             condiciones_inmueble: [],
             proteccion_incendios: [],
@@ -4372,56 +4402,111 @@ app.get(
         });
       }
 
-      const inspeccion = inspeccionResult.rows[0];
+      const inspecciones = inspeccionesResult.rows;
+
+      const inspeccionIds = inspecciones.map(
+        (inspeccion) => inspeccion.id,
+      );
 
       // =================================================
-      // OBTENER DETALLE DE LA INSPECCIÓN
+      // OBTENER TODOS LOS DETALLES DE LAS INSPECCIONES
       // =================================================
 
       const detalleResult = await db.query(
         `
         SELECT
-          id,
-          inspeccion_id,
-          seccion,
-          nombre_condicion,
-          estado,
-          condicion,
-          accion_correctiva,
-          created_at
-        FROM inspecciones_semanales_detalle
-        WHERE inspeccion_id = $1
+          d.id,
+          d.inspeccion_id,
+          d.seccion,
+          d.nombre_condicion,
+          d.estado,
+          d.condicion,
+          d.accion_correctiva,
+          d.created_at,
+
+          i.fecha_registro,
+          i.hora_registro
+
+        FROM inspecciones_semanales_detalle d
+
+        INNER JOIN inspecciones_semanales i
+          ON i.id = d.inspeccion_id
+
+        WHERE d.inspeccion_id = ANY($1::int[])
+
         ORDER BY
-          CASE seccion
+          CASE d.seccion
             WHEN 'condiciones_inmueble' THEN 1
             WHEN 'proteccion_incendios' THEN 2
             WHEN 'ventilacion_iluminacion' THEN 3
             ELSE 4
           END,
-          id ASC
+          d.inspeccion_id DESC,
+          d.id ASC
         `,
-        [inspeccion.id],
+        [inspeccionIds],
       );
 
       const detalles = detalleResult.rows;
 
       // =================================================
-      // AGRUPAR POR SECCIÓN
+      // OBTENER LA VERSIÓN MÁS RECIENTE DE CADA SECCIÓN
+      // =================================================
+
+      const obtenerUltimaSeccion = (nombreSeccion) => {
+        const registrosSeccion = detalles.filter(
+          (item) => item.seccion === nombreSeccion,
+        );
+
+        if (registrosSeccion.length === 0) {
+          return [];
+        }
+
+        // Como puede haber varias inspecciones del mismo día,
+        // tomamos la inspección más reciente que contenga
+        // esa sección.
+        const ultimoInspeccionId = Math.max(
+          ...registrosSeccion.map(
+            (item) => Number(item.inspeccion_id),
+          ),
+        );
+
+        return registrosSeccion.filter(
+          (item) =>
+            Number(item.inspeccion_id) ===
+            ultimoInspeccionId,
+        );
+      };
+
+      // =================================================
+      // AGRUPAR LAS TRES SECCIONES
       // =================================================
 
       const secciones = {
-        condiciones_inmueble: detalles.filter(
-          (item) => item.seccion === "condiciones_inmueble",
-        ),
+        condiciones_inmueble:
+          obtenerUltimaSeccion(
+            "condiciones_inmueble",
+          ),
 
-        proteccion_incendios: detalles.filter(
-          (item) => item.seccion === "proteccion_incendios",
-        ),
+        proteccion_incendios:
+          obtenerUltimaSeccion(
+            "proteccion_incendios",
+          ),
 
-        ventilacion_iluminacion: detalles.filter(
-          (item) => item.seccion === "ventilacion_iluminacion",
-        ),
+        ventilacion_iluminacion:
+          obtenerUltimaSeccion(
+            "ventilacion_iluminacion",
+          ),
       };
+
+      // =================================================
+      // VERIFICAR SI EXISTE INFORMACIÓN REAL
+      // =================================================
+
+      const encontrado =
+        secciones.condiciones_inmueble.length > 0 ||
+        secciones.proteccion_incendios.length > 0 ||
+        secciones.ventilacion_iluminacion.length > 0;
 
       // =================================================
       // RESPUESTA
@@ -4429,9 +4514,17 @@ app.get(
 
       return res.json({
         success: true,
-        encontrado: true,
+        encontrado,
+
         fecha,
-        inspeccion,
+
+        cliente: {
+          id: cliente.id,
+          nombre_empresa: cliente.nombre_empresa,
+        },
+
+        inspecciones,
+
         secciones,
       });
     } catch (error) {
