@@ -4746,29 +4746,33 @@ app.put("/seguimiento-condiciones/:detalleId", async (req, res) => {
     // =====================================================
 
     const resultado = await db.query(
-      `
-      UPDATE inspecciones_semanales_detalle
-      SET
-        accion_corregida = $1,
-        fecha_correccion =
-          CASE
-            WHEN $1 = TRUE THEN CURRENT_TIMESTAMP
-            ELSE NULL
-          END
-      WHERE id = $2
-      RETURNING
-        id,
-        inspeccion_id,
-        seccion,
-        nombre_condicion,
-        estado,
-        condicion,
-        accion_correctiva,
-        accion_corregida,
-        fecha_correccion
-      `,
-      [accion_corregida, detalleId],
-    );
+  `
+  UPDATE inspecciones_semanales_detalle
+  SET
+    accion_corregida = $1::boolean,
+
+    fecha_correccion =
+      CASE
+        WHEN $1::boolean IS TRUE
+          THEN CURRENT_TIMESTAMP
+        ELSE NULL
+      END
+
+  WHERE id = $2
+
+  RETURNING
+    id,
+    inspeccion_id,
+    seccion,
+    nombre_condicion,
+    estado,
+    condicion,
+    accion_correctiva,
+    accion_corregida,
+    fecha_correccion
+  `,
+  [accion_corregida, detalleId],
+);
 
     return res.json({
       success: true,
