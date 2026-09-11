@@ -4043,6 +4043,256 @@ app.post("/registros-semanales/incendios", async (req, res) => {
   }
 });
 
+// =====================================================
+// SISTEMAS DE VENTILACIÓN E ILUMINACIÓN
+// =====================================================
+
+app.post(
+  "/registros-semanales/ventilacion-iluminacion",
+  async (req, res) => {
+    const client = await db.connect();
+
+    try {
+      const {
+        cliente_id,
+        usuario_id,
+        condiciones,
+      } = req.body;
+
+      // =================================================
+      // VALIDACIONES
+      // =================================================
+
+      if (!cliente_id) {
+        return res.status(400).json({
+          success: false,
+          error: "cliente_id es requerido.",
+        });
+      }
+
+      if (
+        !Array.isArray(condiciones) ||
+        condiciones.length !== 2
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Se requieren las 2 condiciones de Sistemas de ventilación e Iluminación.",
+        });
+      }
+
+      const nombresPermitidos = [
+        "Sistema de aire acondicionado",
+        "Iluminación",
+      ];
+
+      for (const item of condiciones) {
+        if (!nombresPermitidos.includes(item.nombre)) {
+          return res.status(400).json({
+            success: false,
+            error: `Condición no válida: ${item.nombre}`,
+          });
+        }
+
+        if (
+          item.estado !== "bueno" &&
+          item.estado !== "malo"
+        ) {
+          return res.status(400).json({
+            success: false,
+            error: `Estado no válido para ${item.nombre}.`,
+          });
+        }
+
+        if (
+          item.estado === "malo" &&
+          (!String(item.condicion || "").trim() ||
+            !String(
+              item.accion_correctiva || "",
+            ).trim())
+        ) {
+          return res.status(400).json({
+            success: false,
+            error: `${item.nombre} requiere condición y acción correctiva.`,
+          });
+        }
+      }
+
+      await client.query("BEGIN");
+
+      // =================================================
+      // BUSCAR INSPECCIÓN DEL MISMO DÍA
+      // =================================================
+
+      const inspeccionExistente =
+        await client.query(
+          `
+          SELECT id
+          FROM inspecciones_semanales
+          WHERE cliente_id = $1
+            AND fecha_registro = CURRENT_DATE
+          ORDER BY id DESC
+          LIMIT 1
+          `,
+          [cliente_id],
+        );
+
+      let inspeccionId;
+
+      if (inspeccionExistente.rows.length > 0) {
+        inspeccionId =
+          inspeccionExistente.rows[0].id;
+      } else {
+        const clienteResult =
+          await client.query(
+            `
+            SELECT nombre_empresa
+            FROM clientes
+            WHERE id = $1
+            `,
+            [cliente_id],
+          );
+
+        if (clienteResult.rows.length === 0) {
+          await client.query("ROLLBACK");
+
+          return res.status(404).json({
+            success: false,
+            error: "Cliente no encontrado.",
+          });
+        }
+
+        const nombreEmpresa =
+          clienteResult.rows[0].nombre_empresa;
+
+        const nuevaInspeccion =
+          await client.query(
+            `
+            INSERT INTO inspecciones_semanales
+            (
+              cliente_id,
+              usuario_id,
+              nombre_empresa,
+              fecha_registro,
+              hora_registro
+            )
+            VALUES
+            (
+              $1,
+              $2,
+              $3,
+              CURRENT_DATE,
+              CURRENT_TIME
+            )
+            RETURNING id
+            `,
+            [
+              cliente_id,
+              usuario_id || null,
+              nombreEmpresa,
+            ],
+          );
+
+        inspeccionId =
+          nuevaInspeccion.rows[0].id;
+      }
+
+      // =================================================
+      // ELIMINAR SOLO ESTA SECCIÓN SI YA EXISTÍA
+      // =================================================
+
+      await client.query(
+        `
+        DELETE FROM inspecciones_semanales_detalle
+        WHERE inspeccion_id = $1
+          AND seccion = $2
+        `,
+        [
+          inspeccionId,
+          "ventilacion_iluminacion",
+        ],
+      );
+
+      // =================================================
+      // INSERTAR LAS DOS CONDICIONES
+      // =================================================
+
+      for (const item of condiciones) {
+        const {
+          nombre,
+          estado,
+          condicion,
+          accion_correctiva,
+        } = item;
+
+        await client.query(
+          `
+          INSERT INTO inspecciones_semanales_detalle
+          (
+            inspeccion_id,
+            seccion,
+            nombre_condicion,
+            estado,
+            condicion,
+            accion_correctiva
+          )
+          VALUES
+          (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6
+          )
+          `,
+          [
+            inspeccionId,
+            "ventilacion_iluminacion",
+            nombre,
+            estado,
+
+            estado === "malo"
+              ? String(condicion || "").trim()
+              : null,
+
+            estado === "malo"
+              ? String(
+                  accion_correctiva || "",
+                ).trim()
+              : null,
+          ],
+        );
+      }
+
+      await client.query("COMMIT");
+
+      return res.status(201).json({
+        success: true,
+        message:
+          "Sistemas de ventilación e Iluminación guardados correctamente.",
+        inspeccion_id: inspeccionId,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+
+      console.error(
+        "ERROR GUARDANDO VENTILACIÓN E ILUMINACIÓN:",
+        error,
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "Error al guardar Sistemas de ventilación e Iluminación.",
+        detalle: error.message,
+      });
+    } finally {
+      client.release();
+    }
+  },
+);
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
