@@ -4663,6 +4663,135 @@ app.get("/seguimiento-condiciones/:clienteId", async (req, res) => {
   }
 });
 
+// =====================================================
+// ACTUALIZAR SEGUIMIENTO DE CONDICIÓN INSEGURA
+// =====================================================
+
+app.put("/seguimiento-condiciones/:detalleId", async (req, res) => {
+  try {
+    const { detalleId } = req.params;
+
+    const { accion_corregida } = req.body;
+
+    // =====================================================
+    // VALIDAR ID
+    // =====================================================
+
+    if (!detalleId || isNaN(Number(detalleId))) {
+      return res.status(400).json({
+        success: false,
+        error: "Registro inválido.",
+      });
+    }
+
+    // =====================================================
+    // VALIDAR CHECKBOX
+    // =====================================================
+
+    if (typeof accion_corregida !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        error:
+          "El campo accion_corregida debe ser true o false.",
+      });
+    }
+
+    // =====================================================
+    // VERIFICAR QUE EL REGISTRO EXISTA
+    // =====================================================
+
+    const registroExistente = await db.query(
+      `
+      SELECT
+        id,
+        inspeccion_id,
+        seccion,
+        nombre_condicion,
+        estado,
+        condicion,
+        accion_correctiva,
+        accion_corregida,
+        fecha_correccion
+      FROM inspecciones_semanales_detalle
+      WHERE id = $1
+      `,
+      [detalleId],
+    );
+
+    if (registroExistente.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "El registro no existe.",
+      });
+    }
+
+    const registro = registroExistente.rows[0];
+
+    // =====================================================
+    // SOLO PERMITIR SEGUIMIENTO DE CONDICIONES MALAS
+    // =====================================================
+
+    if (
+      String(registro.estado).toLowerCase() !== "malo"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Solo se pueden actualizar condiciones registradas como Malo.",
+      });
+    }
+
+    // =====================================================
+    // ACTUALIZAR
+    // =====================================================
+
+    const resultado = await db.query(
+      `
+      UPDATE inspecciones_semanales_detalle
+      SET
+        accion_corregida = $1,
+        fecha_correccion =
+          CASE
+            WHEN $1 = TRUE THEN CURRENT_TIMESTAMP
+            ELSE NULL
+          END
+      WHERE id = $2
+      RETURNING
+        id,
+        inspeccion_id,
+        seccion,
+        nombre_condicion,
+        estado,
+        condicion,
+        accion_correctiva,
+        accion_corregida,
+        fecha_correccion
+      `,
+      [accion_corregida, detalleId],
+    );
+
+    return res.json({
+      success: true,
+      message: accion_corregida
+        ? "La acción correctiva fue marcada como corregida."
+        : "La acción correctiva fue marcada como pendiente.",
+      registro: resultado.rows[0],
+    });
+  } catch (error) {
+    console.log(
+      "ERROR ACTUALIZANDO SEGUIMIENTO:",
+      error,
+    );
+
+    return res.status(500).json({
+      success: false,
+      error:
+        "No fue posible actualizar el seguimiento de la condición.",
+      detalle: error.message,
+    });
+  }
+});
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
