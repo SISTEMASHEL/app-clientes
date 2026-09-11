@@ -4047,86 +4047,68 @@ app.post("/registros-semanales/incendios", async (req, res) => {
 // SISTEMAS DE VENTILACIÓN E ILUMINACIÓN
 // =====================================================
 
-app.post(
-  "/registros-semanales/ventilacion-iluminacion",
-  async (req, res) => {
-    const client = await db.connect();
+app.post("/registros-semanales/ventilacion-iluminacion", async (req, res) => {
+  const client = await db.connect();
 
-    try {
-      const {
-        cliente_id,
-        usuario_id,
-        condiciones,
-      } = req.body;
+  try {
+    const { cliente_id, usuario_id, condiciones } = req.body;
 
-      // =================================================
-      // VALIDACIONES
-      // =================================================
+    // =================================================
+    // VALIDACIONES
+    // =================================================
 
-      if (!cliente_id) {
+    if (!cliente_id) {
+      return res.status(400).json({
+        success: false,
+        error: "cliente_id es requerido.",
+      });
+    }
+
+    if (!Array.isArray(condiciones) || condiciones.length !== 2) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Se requieren las 2 condiciones de Sistemas de ventilación e Iluminación.",
+      });
+    }
+
+    const nombresPermitidos = ["Sistema de aire acondicionado", "Iluminación"];
+
+    for (const item of condiciones) {
+      if (!nombresPermitidos.includes(item.nombre)) {
         return res.status(400).json({
           success: false,
-          error: "cliente_id es requerido.",
+          error: `Condición no válida: ${item.nombre}`,
+        });
+      }
+
+      if (item.estado !== "bueno" && item.estado !== "malo") {
+        return res.status(400).json({
+          success: false,
+          error: `Estado no válido para ${item.nombre}.`,
         });
       }
 
       if (
-        !Array.isArray(condiciones) ||
-        condiciones.length !== 2
+        item.estado === "malo" &&
+        (!String(item.condicion || "").trim() ||
+          !String(item.accion_correctiva || "").trim())
       ) {
         return res.status(400).json({
           success: false,
-          error:
-            "Se requieren las 2 condiciones de Sistemas de ventilación e Iluminación.",
+          error: `${item.nombre} requiere condición y acción correctiva.`,
         });
       }
+    }
 
-      const nombresPermitidos = [
-        "Sistema de aire acondicionado",
-        "Iluminación",
-      ];
+    await client.query("BEGIN");
 
-      for (const item of condiciones) {
-        if (!nombresPermitidos.includes(item.nombre)) {
-          return res.status(400).json({
-            success: false,
-            error: `Condición no válida: ${item.nombre}`,
-          });
-        }
+    // =================================================
+    // BUSCAR INSPECCIÓN DEL MISMO DÍA
+    // =================================================
 
-        if (
-          item.estado !== "bueno" &&
-          item.estado !== "malo"
-        ) {
-          return res.status(400).json({
-            success: false,
-            error: `Estado no válido para ${item.nombre}.`,
-          });
-        }
-
-        if (
-          item.estado === "malo" &&
-          (!String(item.condicion || "").trim() ||
-            !String(
-              item.accion_correctiva || "",
-            ).trim())
-        ) {
-          return res.status(400).json({
-            success: false,
-            error: `${item.nombre} requiere condición y acción correctiva.`,
-          });
-        }
-      }
-
-      await client.query("BEGIN");
-
-      // =================================================
-      // BUSCAR INSPECCIÓN DEL MISMO DÍA
-      // =================================================
-
-      const inspeccionExistente =
-        await client.query(
-          `
+    const inspeccionExistente = await client.query(
+      `
           SELECT id
           FROM inspecciones_semanales
           WHERE cliente_id = $1
@@ -4134,40 +4116,36 @@ app.post(
           ORDER BY id DESC
           LIMIT 1
           `,
-          [cliente_id],
-        );
+      [cliente_id],
+    );
 
-      let inspeccionId;
+    let inspeccionId;
 
-      if (inspeccionExistente.rows.length > 0) {
-        inspeccionId =
-          inspeccionExistente.rows[0].id;
-      } else {
-        const clienteResult =
-          await client.query(
-            `
+    if (inspeccionExistente.rows.length > 0) {
+      inspeccionId = inspeccionExistente.rows[0].id;
+    } else {
+      const clienteResult = await client.query(
+        `
             SELECT nombre_empresa
             FROM clientes
             WHERE id = $1
             `,
-            [cliente_id],
-          );
+        [cliente_id],
+      );
 
-        if (clienteResult.rows.length === 0) {
-          await client.query("ROLLBACK");
+      if (clienteResult.rows.length === 0) {
+        await client.query("ROLLBACK");
 
-          return res.status(404).json({
-            success: false,
-            error: "Cliente no encontrado.",
-          });
-        }
+        return res.status(404).json({
+          success: false,
+          error: "Cliente no encontrado.",
+        });
+      }
 
-        const nombreEmpresa =
-          clienteResult.rows[0].nombre_empresa;
+      const nombreEmpresa = clienteResult.rows[0].nombre_empresa;
 
-        const nuevaInspeccion =
-          await client.query(
-            `
+      const nuevaInspeccion = await client.query(
+        `
             INSERT INTO inspecciones_semanales
             (
               cliente_id,
@@ -4186,47 +4164,34 @@ app.post(
             )
             RETURNING id
             `,
-            [
-              cliente_id,
-              usuario_id || null,
-              nombreEmpresa,
-            ],
-          );
+        [cliente_id, usuario_id || null, nombreEmpresa],
+      );
 
-        inspeccionId =
-          nuevaInspeccion.rows[0].id;
-      }
+      inspeccionId = nuevaInspeccion.rows[0].id;
+    }
 
-      // =================================================
-      // ELIMINAR SOLO ESTA SECCIÓN SI YA EXISTÍA
-      // =================================================
+    // =================================================
+    // ELIMINAR SOLO ESTA SECCIÓN SI YA EXISTÍA
+    // =================================================
 
-      await client.query(
-        `
+    await client.query(
+      `
         DELETE FROM inspecciones_semanales_detalle
         WHERE inspeccion_id = $1
           AND seccion = $2
         `,
-        [
-          inspeccionId,
-          "ventilacion_iluminacion",
-        ],
-      );
+      [inspeccionId, "ventilacion_iluminacion"],
+    );
 
-      // =================================================
-      // INSERTAR LAS DOS CONDICIONES
-      // =================================================
+    // =================================================
+    // INSERTAR LAS DOS CONDICIONES
+    // =================================================
 
-      for (const item of condiciones) {
-        const {
-          nombre,
-          estado,
-          condicion,
-          accion_correctiva,
-        } = item;
+    for (const item of condiciones) {
+      const { nombre, estado, condicion, accion_correctiva } = item;
 
-        await client.query(
-          `
+      await client.query(
+        `
           INSERT INTO inspecciones_semanales_detalle
           (
             inspeccion_id,
@@ -4246,120 +4211,106 @@ app.post(
             $6
           )
           `,
-          [
-            inspeccionId,
-            "ventilacion_iluminacion",
-            nombre,
-            estado,
+        [
+          inspeccionId,
+          "ventilacion_iluminacion",
+          nombre,
+          estado,
 
-            estado === "malo"
-              ? String(condicion || "").trim()
-              : null,
+          estado === "malo" ? String(condicion || "").trim() : null,
 
-            estado === "malo"
-              ? String(
-                  accion_correctiva || "",
-                ).trim()
-              : null,
-          ],
-        );
-      }
-
-      await client.query("COMMIT");
-
-      return res.status(201).json({
-        success: true,
-        message:
-          "Sistemas de ventilación e Iluminación guardados correctamente.",
-        inspeccion_id: inspeccionId,
-      });
-    } catch (error) {
-      await client.query("ROLLBACK");
-
-      console.error(
-        "ERROR GUARDANDO VENTILACIÓN E ILUMINACIÓN:",
-        error,
+          estado === "malo" ? String(accion_correctiva || "").trim() : null,
+        ],
       );
-
-      return res.status(500).json({
-        success: false,
-        error:
-          "Error al guardar Sistemas de ventilación e Iluminación.",
-        detalle: error.message,
-      });
-    } finally {
-      client.release();
     }
-  },
-);
+
+    await client.query("COMMIT");
+
+    return res.status(201).json({
+      success: true,
+      message: "Sistemas de ventilación e Iluminación guardados correctamente.",
+      inspeccion_id: inspeccionId,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+
+    console.error("ERROR GUARDANDO VENTILACIÓN E ILUMINACIÓN:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "Error al guardar Sistemas de ventilación e Iluminación.",
+      detalle: error.message,
+    });
+  } finally {
+    client.release();
+  }
+});
 
 // =====================================================
 // OBTENER REGISTROS SEMANALES POR CLIENTE Y FECHA
 // =====================================================
 
-app.get(
-  "/registros-semanales/:clienteId/:fecha",
-  async (req, res) => {
-    try {
-      const { clienteId, fecha } = req.params;
+app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
+  try {
+    const { clienteId, fecha } = req.params;
 
-      // =================================================
-      // VALIDACIONES
-      // =================================================
+    // =================================================
+    // VALIDACIONES
+    // =================================================
 
-      if (!clienteId) {
-        return res.status(400).json({
-          success: false,
-          error: "clienteId es requerido.",
-        });
-      }
+    if (!clienteId) {
+      return res.status(400).json({
+        success: false,
+        error: "clienteId es requerido.",
+      });
+    }
 
-      if (!fecha) {
-        return res.status(400).json({
-          success: false,
-          error: "La fecha es requerida.",
-        });
-      }
+    if (!fecha) {
+      return res.status(400).json({
+        success: false,
+        error: "La fecha es requerida.",
+      });
+    }
 
-      const formatoFecha = /^\d{4}-\d{2}-\d{2}$/;
+    const formatoFecha = /^\d{4}-\d{2}-\d{2}$/;
 
-      if (!formatoFecha.test(fecha)) {
-        return res.status(400).json({
-          success: false,
-          error: "La fecha debe tener formato YYYY-MM-DD.",
-        });
-      }
+    if (!formatoFecha.test(fecha)) {
+      return res.status(400).json({
+        success: false,
+        error: "La fecha debe tener formato YYYY-MM-DD.",
+      });
+    }
 
-      // =================================================
-      // VERIFICAR CLIENTE
-      // =================================================
+    // =================================================
+    // VERIFICAR CLIENTE
+    // =================================================
 
-      const clienteResult = await db.query(
-        `
+    const clienteResult = await db.query(
+      `
         SELECT
           id,
           nombre_empresa
         FROM clientes
         WHERE id = $1
         `,
-        [clienteId],
-      );
+      [clienteId],
+    );
 
-      if (clienteResult.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          error: "Cliente no encontrado.",
-        });
-      }
+    if (clienteResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Cliente no encontrado.",
+      });
+    }
 
-      const cliente = clienteResult.rows[0];
+    const cliente = clienteResult.rows[0];
 
-      // =================================================
-      // BUSCAR TODAS LAS INSPECCIONES DE ESA FECHA
-      // =================================================
+    // =================================================
+    // BUSCAR TODAS LAS INSPECCIONES DE ESA FECHA
+    // =================================================
 
-      const inspeccionesResult = await db.query(
-        `
+    const inspeccionesResult = await db.query(
+      `
         SELECT
           id,
           cliente_id,
@@ -4373,47 +4324,45 @@ app.get(
           AND fecha_registro = $2::date
         ORDER BY id ASC
         `,
-        [clienteId, fecha],
-      );
+      [clienteId, fecha],
+    );
 
-      // =================================================
-      // NO HAY REGISTROS
-      // =================================================
+    // =================================================
+    // NO HAY REGISTROS
+    // =================================================
 
-      if (inspeccionesResult.rows.length === 0) {
-        return res.json({
-          success: true,
-          encontrado: false,
+    if (inspeccionesResult.rows.length === 0) {
+      return res.json({
+        success: true,
+        encontrado: false,
 
-          fecha,
+        fecha,
 
-          cliente: {
-            id: cliente.id,
-            nombre_empresa: cliente.nombre_empresa,
-          },
+        cliente: {
+          id: cliente.id,
+          nombre_empresa: cliente.nombre_empresa,
+        },
 
-          inspecciones: [],
+        inspecciones: [],
 
-          secciones: {
-            condiciones_inmueble: [],
-            proteccion_incendios: [],
-            ventilacion_iluminacion: [],
-          },
-        });
-      }
+        secciones: {
+          condiciones_inmueble: [],
+          proteccion_incendios: [],
+          ventilacion_iluminacion: [],
+        },
+      });
+    }
 
-      const inspecciones = inspeccionesResult.rows;
+    const inspecciones = inspeccionesResult.rows;
 
-      const inspeccionIds = inspecciones.map(
-        (inspeccion) => inspeccion.id,
-      );
+    const inspeccionIds = inspecciones.map((inspeccion) => inspeccion.id);
 
-      // =================================================
-      // OBTENER TODOS LOS DETALLES DE LAS INSPECCIONES
-      // =================================================
+    // =================================================
+    // OBTENER TODOS LOS DETALLES DE LAS INSPECCIONES
+    // =================================================
 
-      const detalleResult = await db.query(
-        `
+    const detalleResult = await db.query(
+      `
         SELECT
           d.id,
           d.inspeccion_id,
@@ -4444,104 +4393,87 @@ app.get(
           d.inspeccion_id DESC,
           d.id ASC
         `,
-        [inspeccionIds],
+      [inspeccionIds],
+    );
+
+    const detalles = detalleResult.rows;
+
+    // =================================================
+    // OBTENER LA VERSIÓN MÁS RECIENTE DE CADA SECCIÓN
+    // =================================================
+
+    const obtenerUltimaSeccion = (nombreSeccion) => {
+      const registrosSeccion = detalles.filter(
+        (item) => item.seccion === nombreSeccion,
       );
 
-      const detalles = detalleResult.rows;
+      if (registrosSeccion.length === 0) {
+        return [];
+      }
 
-      // =================================================
-      // OBTENER LA VERSIÓN MÁS RECIENTE DE CADA SECCIÓN
-      // =================================================
-
-      const obtenerUltimaSeccion = (nombreSeccion) => {
-        const registrosSeccion = detalles.filter(
-          (item) => item.seccion === nombreSeccion,
-        );
-
-        if (registrosSeccion.length === 0) {
-          return [];
-        }
-
-        // Como puede haber varias inspecciones del mismo día,
-        // tomamos la inspección más reciente que contenga
-        // esa sección.
-        const ultimoInspeccionId = Math.max(
-          ...registrosSeccion.map(
-            (item) => Number(item.inspeccion_id),
-          ),
-        );
-
-        return registrosSeccion.filter(
-          (item) =>
-            Number(item.inspeccion_id) ===
-            ultimoInspeccionId,
-        );
-      };
-
-      // =================================================
-      // AGRUPAR LAS TRES SECCIONES
-      // =================================================
-
-      const secciones = {
-        condiciones_inmueble:
-          obtenerUltimaSeccion(
-            "condiciones_inmueble",
-          ),
-
-        proteccion_incendios:
-          obtenerUltimaSeccion(
-            "proteccion_incendios",
-          ),
-
-        ventilacion_iluminacion:
-          obtenerUltimaSeccion(
-            "ventilacion_iluminacion",
-          ),
-      };
-
-      // =================================================
-      // VERIFICAR SI EXISTE INFORMACIÓN REAL
-      // =================================================
-
-      const encontrado =
-        secciones.condiciones_inmueble.length > 0 ||
-        secciones.proteccion_incendios.length > 0 ||
-        secciones.ventilacion_iluminacion.length > 0;
-
-      // =================================================
-      // RESPUESTA
-      // =================================================
-
-      return res.json({
-        success: true,
-        encontrado,
-
-        fecha,
-
-        cliente: {
-          id: cliente.id,
-          nombre_empresa: cliente.nombre_empresa,
-        },
-
-        inspecciones,
-
-        secciones,
-      });
-    } catch (error) {
-      console.error(
-        "ERROR CONSULTANDO REGISTROS SEMANALES POR FECHA:",
-        error,
+      // Como puede haber varias inspecciones del mismo día,
+      // tomamos la inspección más reciente que contenga
+      // esa sección.
+      const ultimoInspeccionId = Math.max(
+        ...registrosSeccion.map((item) => Number(item.inspeccion_id)),
       );
 
-      return res.status(500).json({
-        success: false,
-        error:
-          "Error al consultar los registros semanales de la fecha seleccionada.",
-        detalle: error.message,
-      });
-    }
-  },
-);
+      return registrosSeccion.filter(
+        (item) => Number(item.inspeccion_id) === ultimoInspeccionId,
+      );
+    };
+
+    // =================================================
+    // AGRUPAR LAS TRES SECCIONES
+    // =================================================
+
+    const secciones = {
+      condiciones_inmueble: obtenerUltimaSeccion("condiciones_inmueble"),
+
+      proteccion_incendios: obtenerUltimaSeccion("proteccion_incendios"),
+
+      ventilacion_iluminacion: obtenerUltimaSeccion("ventilacion_iluminacion"),
+    };
+
+    // =================================================
+    // VERIFICAR SI EXISTE INFORMACIÓN REAL
+    // =================================================
+
+    const encontrado =
+      secciones.condiciones_inmueble.length > 0 ||
+      secciones.proteccion_incendios.length > 0 ||
+      secciones.ventilacion_iluminacion.length > 0;
+
+    // =================================================
+    // RESPUESTA
+    // =================================================
+
+    return res.json({
+      success: true,
+      encontrado,
+
+      fecha,
+
+      cliente: {
+        id: cliente.id,
+        nombre_empresa: cliente.nombre_empresa,
+      },
+
+      inspecciones,
+
+      secciones,
+    });
+  } catch (error) {
+    console.error("ERROR CONSULTANDO REGISTROS SEMANALES POR FECHA:", error);
+
+    return res.status(500).json({
+      success: false,
+      error:
+        "Error al consultar los registros semanales de la fecha seleccionada.",
+      detalle: error.message,
+    });
+  }
+});
 
 // =====================================================
 // SEGUIMIENTO DE CONDICIONES INSEGURAS
@@ -4568,42 +4500,46 @@ app.get("/seguimiento-condiciones/:clienteId", async (req, res) => {
 
     const resultado = await db.query(
       `
-      SELECT
-        d.id,
-        d.inspeccion_id,
-        d.seccion,
-        d.nombre_condicion,
-        d.estado,
-        d.condicion,
-        d.accion_correctiva,
-        d.accion_corregida,
-        d.fecha_correccion,
+  SELECT
+    d.id,
+    d.inspeccion_id,
+    d.seccion,
+    d.nombre_condicion,
+    d.estado,
+    d.condicion,
+    d.accion_correctiva,
+    d.accion_corregida,
+    d.fecha_correccion,
+    d.comentario_correccion,
 
-        i.cliente_id,
-        i.usuario_id,
-        i.nombre_empresa,
-        i.fecha_registro,
-        i.hora_registro,
-        i.created_at,
+    i.cliente_id,
+    i.usuario_id,
+    i.nombre_empresa,
+    i.fecha_registro,
+    i.hora_registro,
+    i.created_at,
 
-        GREATEST(
-          CURRENT_DATE - i.fecha_registro,
-          0
-        ) AS dias_transcurridos
+    GREATEST(
+      COALESCE(
+        d.fecha_correccion::date,
+        CURRENT_DATE
+      ) - i.fecha_registro,
+      0
+    ) AS dias_transcurridos
 
-      FROM inspecciones_semanales_detalle d
+  FROM inspecciones_semanales_detalle d
 
-      INNER JOIN inspecciones_semanales i
-        ON i.id = d.inspeccion_id
+  INNER JOIN inspecciones_semanales i
+    ON i.id = d.inspeccion_id
 
-      WHERE i.cliente_id = $1
-        AND LOWER(d.estado) = 'malo'
+  WHERE i.cliente_id = $1
+    AND LOWER(d.estado) = 'malo'
 
-      ORDER BY
-        d.accion_corregida ASC,
-        i.fecha_registro ASC,
-        d.id ASC
-      `,
+  ORDER BY
+    d.accion_corregida ASC,
+    i.fecha_registro ASC,
+    d.id ASC
+  `,
       [clienteId],
     );
 
@@ -4636,23 +4572,18 @@ app.get("/seguimiento-condiciones/:clienteId", async (req, res) => {
 
       total: registros.length,
 
-      pendientes: registros.filter(
-        (item) => item.accion_corregida === false,
-      ).length,
+      pendientes: registros.filter((item) => item.accion_corregida === false)
+        .length,
 
-      corregidos: registros.filter(
-        (item) => item.accion_corregida === true,
-      ).length,
+      corregidos: registros.filter((item) => item.accion_corregida === true)
+        .length,
 
       registros,
 
       secciones,
     });
   } catch (error) {
-    console.log(
-      "ERROR CONSULTANDO SEGUIMIENTO DE CONDICIONES:",
-      error,
-    );
+    console.log("ERROR CONSULTANDO SEGUIMIENTO DE CONDICIONES:", error);
 
     return res.status(500).json({
       success: false,
@@ -4667,11 +4598,18 @@ app.get("/seguimiento-condiciones/:clienteId", async (req, res) => {
 // ACTUALIZAR SEGUIMIENTO DE CONDICIÓN INSEGURA
 // =====================================================
 
+// =====================================================
+// ACTUALIZAR SEGUIMIENTO DE CONDICIÓN INSEGURA
+// =====================================================
+
 app.put("/seguimiento-condiciones/:detalleId", async (req, res) => {
   try {
     const { detalleId } = req.params;
 
-    const { accion_corregida } = req.body;
+    const {
+      accion_corregida,
+      comentario_correccion,
+    } = req.body;
 
     // =====================================================
     // VALIDAR ID
@@ -4697,6 +4635,21 @@ app.put("/seguimiento-condiciones/:detalleId", async (req, res) => {
     }
 
     // =====================================================
+    // VALIDAR COMENTARIO ANTES DE ACTUALIZAR
+    // =====================================================
+
+    if (
+      accion_corregida === true &&
+      !String(comentario_correccion || "").trim()
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Debes agregar un comentario antes de marcar la acción como corregida.",
+      });
+    }
+
+    // =====================================================
     // VERIFICAR QUE EL REGISTRO EXISTA
     // =====================================================
 
@@ -4711,8 +4664,11 @@ app.put("/seguimiento-condiciones/:detalleId", async (req, res) => {
         condicion,
         accion_correctiva,
         accion_corregida,
-        fecha_correccion
+        fecha_correccion,
+        comentario_correccion
+
       FROM inspecciones_semanales_detalle
+
       WHERE id = $1
       `,
       [detalleId],
@@ -4746,39 +4702,63 @@ app.put("/seguimiento-condiciones/:detalleId", async (req, res) => {
     // =====================================================
 
     const resultado = await db.query(
-  `
-  UPDATE inspecciones_semanales_detalle
-  SET
-    accion_corregida = $1::boolean,
+      `
+      UPDATE inspecciones_semanales_detalle
 
-    fecha_correccion =
-      CASE
-        WHEN $1::boolean IS TRUE
-          THEN CURRENT_TIMESTAMP
-        ELSE NULL
-      END
+      SET
+        accion_corregida = $1::boolean,
 
-  WHERE id = $2
+        fecha_correccion =
+          CASE
+            WHEN $1::boolean IS TRUE
+              THEN COALESCE(
+                fecha_correccion,
+                CURRENT_TIMESTAMP
+              )
+            ELSE NULL
+          END,
 
-  RETURNING
-    id,
-    inspeccion_id,
-    seccion,
-    nombre_condicion,
-    estado,
-    condicion,
-    accion_correctiva,
-    accion_corregida,
-    fecha_correccion
-  `,
-  [accion_corregida, detalleId],
-);
+        comentario_correccion =
+          CASE
+            WHEN $1::boolean IS TRUE
+              THEN $2
+            ELSE NULL
+          END
+
+      WHERE id = $3
+
+      RETURNING
+        id,
+        inspeccion_id,
+        seccion,
+        nombre_condicion,
+        estado,
+        condicion,
+        accion_correctiva,
+        accion_corregida,
+        fecha_correccion,
+        comentario_correccion
+      `,
+      [
+        accion_corregida,
+
+        accion_corregida
+          ? String(
+              comentario_correccion || "",
+            ).trim()
+          : null,
+
+        detalleId,
+      ],
+    );
 
     return res.json({
       success: true,
+
       message: accion_corregida
         ? "La acción correctiva fue marcada como corregida."
         : "La acción correctiva fue marcada como pendiente.",
+
       registro: resultado.rows[0],
     });
   } catch (error) {
