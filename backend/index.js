@@ -4248,7 +4248,7 @@ app.post("/registros-semanales/ventilacion-iluminacion", async (req, res) => {
 
 // =====================================================
 // OBTENER REGISTROS SEMANALES POR CLIENTE Y FECHA
-// INCLUYE INFORMACIÓN DE CORRECCIÓN Y SEGUIMIENTO
+// HISTORIAL COMPLETO + SEGUIMIENTO DE CORRECCIONES
 // =====================================================
 
 app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
@@ -4259,10 +4259,10 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
     // VALIDACIONES
     // =================================================
 
-    if (!clienteId) {
+    if (!clienteId || isNaN(Number(clienteId))) {
       return res.status(400).json({
         success: false,
-        error: "clienteId es requerido.",
+        error: "clienteId inválido.",
       });
     }
 
@@ -4323,13 +4323,16 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
         FROM inspecciones_semanales
         WHERE cliente_id = $1
           AND fecha_registro = $2::date
-        ORDER BY id ASC
+        ORDER BY
+          fecha_registro ASC,
+          hora_registro ASC,
+          id ASC
       `,
       [clienteId, fecha],
     );
 
     // =================================================
-    // NO HAY REGISTROS
+    // NO HAY REGISTROS PARA ESA FECHA
     // =================================================
 
     if (inspeccionesResult.rows.length === 0) {
@@ -4356,17 +4359,25 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
 
     const inspecciones = inspeccionesResult.rows;
 
-    const inspeccionIds = inspecciones.map(
-      (inspeccion) => inspeccion.id,
-    );
+    const inspeccionIds = inspecciones.map((inspeccion) => inspeccion.id);
 
     // =================================================
-    // OBTENER TODOS LOS DETALLES DE LAS INSPECCIONES
+    // OBTENER TODOS LOS DETALLES HISTÓRICOS
+    // DE TODAS LAS INSPECCIONES DE ESA FECHA
     //
     // IMPORTANTE:
-    // Se conserva el estado original de la inspección.
-    // Si posteriormente fue corregida, también se
-    // devuelve la información del seguimiento.
+    // NO se elimina ninguna inspección anterior.
+    //
+    // Cada registro conserva:
+    // - estado original
+    // - condición original
+    // - acción correctiva original
+    //
+    // Y además incluye:
+    // - accion_corregida
+    // - fecha_correccion
+    // - comentario_correccion
+    // - dias_transcurridos
     // =================================================
 
     const detalleResult = await db.query(
@@ -4390,16 +4401,42 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
           i.hora_registro,
 
           CASE
-            WHEN d.accion_corregida IS TRUE
+
+            -- ==========================================
+            -- CONDICIÓN MALA QUE YA FUE CORREGIDA
+            -- El contador termina en la fecha
+            -- en que se realizó la corrección.
+            -- ==========================================
+
+            WHEN LOWER(d.estado) = 'malo'
+              AND d.accion_corregida IS TRUE
               AND d.fecha_correccion IS NOT NULL
+
             THEN GREATEST(
               d.fecha_correccion::date - i.fecha_registro,
               0
             )
-            ELSE GREATEST(
+
+            -- ==========================================
+            -- CONDICIÓN MALA TODAVÍA PENDIENTE
+            -- El contador continúa hasta hoy.
+            -- ==========================================
+
+            WHEN LOWER(d.estado) = 'malo'
+              AND COALESCE(d.accion_corregida, FALSE) = FALSE
+
+            THEN GREATEST(
               CURRENT_DATE - i.fecha_registro,
               0
             )
+
+            -- ==========================================
+            -- CONDICIONES BUENAS
+            -- No necesitan contador de seguimiento.
+            -- ==========================================
+
+            ELSE 0
+
           END AS dias_transcurridos
 
         FROM inspecciones_semanales_detalle d
@@ -4410,13 +4447,17 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
         WHERE d.inspeccion_id = ANY($1::int[])
 
         ORDER BY
+          i.fecha_registro ASC,
+          i.hora_registro ASC,
+
           CASE d.seccion
             WHEN 'condiciones_inmueble' THEN 1
             WHEN 'proteccion_incendios' THEN 2
             WHEN 'ventilacion_iluminacion' THEN 3
             ELSE 4
           END,
-          d.inspeccion_id DESC,
+
+          d.inspeccion_id ASC,
           d.id ASC
       `,
       [inspeccionIds],
@@ -4425,48 +4466,63 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
     const detalles = detalleResult.rows;
 
     // =================================================
-    // OBTENER LA VERSIÓN MÁS RECIENTE DE CADA SECCIÓN
+    // CONSERVAR TODOS LOS REGISTROS HISTÓRICOS
+    // DE CADA SECCIÓN
+    //
+    // ANTES:
+    // Se conservaba únicamente la última inspección
+    // de cada sección.
+    //
+    // AHORA:
+    // Se conservan TODAS las inspecciones realizadas
+    // durante la fecha seleccionada.
     // =================================================
 
-    const obtenerUltimaSeccion = (nombreSeccion) => {
-      const registrosSeccion = detalles.filter(
-        (item) => item.seccion === nombreSeccion,
-      );
+    const obtenerRegistrosSeccion = (nombreSeccion) => {
+      return detalles
+        .filter((item) => item.seccion === nombreSeccion)
+        .sort((a, b) => {
+          // =============================================
+          // PRIMERO ORDENAR POR HORA DE REGISTRO
+          // =============================================
 
-      if (registrosSeccion.length === 0) {
-        return [];
-      }
+          const horaA = String(a.hora_registro || "");
+          const horaB = String(b.hora_registro || "");
 
-      // Como puede haber varias inspecciones del mismo día,
-      // tomamos la inspección más reciente que contenga
-      // esa sección.
-      const ultimoInspeccionId = Math.max(
-        ...registrosSeccion.map(
-          (item) => Number(item.inspeccion_id),
-        ),
-      );
+          if (horaA !== horaB) {
+            return horaA.localeCompare(horaB);
+          }
 
-      return registrosSeccion.filter(
-        (item) =>
-          Number(item.inspeccion_id) ===
-          ultimoInspeccionId,
-      );
+          // =============================================
+          // DESPUÉS POR INSPECCIÓN
+          // =============================================
+
+          const inspeccionA = Number(a.inspeccion_id);
+          const inspeccionB = Number(b.inspeccion_id);
+
+          if (inspeccionA !== inspeccionB) {
+            return inspeccionA - inspeccionB;
+          }
+
+          // =============================================
+          // FINALMENTE POR ID DEL DETALLE
+          // =============================================
+
+          return Number(a.id) - Number(b.id);
+        });
     };
 
     // =================================================
     // AGRUPAR LAS TRES SECCIONES
+    // CONSERVANDO TODO EL HISTORIAL
     // =================================================
 
     const secciones = {
-      condiciones_inmueble: obtenerUltimaSeccion(
-        "condiciones_inmueble",
-      ),
+      condiciones_inmueble: obtenerRegistrosSeccion("condiciones_inmueble"),
 
-      proteccion_incendios: obtenerUltimaSeccion(
-        "proteccion_incendios",
-      ),
+      proteccion_incendios: obtenerRegistrosSeccion("proteccion_incendios"),
 
-      ventilacion_iluminacion: obtenerUltimaSeccion(
+      ventilacion_iluminacion: obtenerRegistrosSeccion(
         "ventilacion_iluminacion",
       ),
     };
@@ -4500,10 +4556,7 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
       secciones,
     });
   } catch (error) {
-    console.error(
-      "ERROR CONSULTANDO REGISTROS SEMANALES POR FECHA:",
-      error,
-    );
+    console.error("ERROR CONSULTANDO REGISTROS SEMANALES POR FECHA:", error);
 
     return res.status(500).json({
       success: false,
