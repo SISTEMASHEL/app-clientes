@@ -4248,6 +4248,7 @@ app.post("/registros-semanales/ventilacion-iluminacion", async (req, res) => {
 
 // =====================================================
 // OBTENER REGISTROS SEMANALES POR CLIENTE Y FECHA
+// INCLUYE INFORMACIÓN DE CORRECCIÓN Y SEGUIMIENTO
 // =====================================================
 
 app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
@@ -4292,7 +4293,7 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
           nombre_empresa
         FROM clientes
         WHERE id = $1
-        `,
+      `,
       [clienteId],
     );
 
@@ -4323,7 +4324,7 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
         WHERE cliente_id = $1
           AND fecha_registro = $2::date
         ORDER BY id ASC
-        `,
+      `,
       [clienteId, fecha],
     );
 
@@ -4355,10 +4356,17 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
 
     const inspecciones = inspeccionesResult.rows;
 
-    const inspeccionIds = inspecciones.map((inspeccion) => inspeccion.id);
+    const inspeccionIds = inspecciones.map(
+      (inspeccion) => inspeccion.id,
+    );
 
     // =================================================
     // OBTENER TODOS LOS DETALLES DE LAS INSPECCIONES
+    //
+    // IMPORTANTE:
+    // Se conserva el estado original de la inspección.
+    // Si posteriormente fue corregida, también se
+    // devuelve la información del seguimiento.
     // =================================================
 
     const detalleResult = await db.query(
@@ -4371,10 +4379,28 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
           d.estado,
           d.condicion,
           d.accion_correctiva,
+
+          d.accion_corregida,
+          d.fecha_correccion,
+          d.comentario_correccion,
+
           d.created_at,
 
           i.fecha_registro,
-          i.hora_registro
+          i.hora_registro,
+
+          CASE
+            WHEN d.accion_corregida IS TRUE
+              AND d.fecha_correccion IS NOT NULL
+            THEN GREATEST(
+              d.fecha_correccion::date - i.fecha_registro,
+              0
+            )
+            ELSE GREATEST(
+              CURRENT_DATE - i.fecha_registro,
+              0
+            )
+          END AS dias_transcurridos
 
         FROM inspecciones_semanales_detalle d
 
@@ -4392,7 +4418,7 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
           END,
           d.inspeccion_id DESC,
           d.id ASC
-        `,
+      `,
       [inspeccionIds],
     );
 
@@ -4415,11 +4441,15 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
       // tomamos la inspección más reciente que contenga
       // esa sección.
       const ultimoInspeccionId = Math.max(
-        ...registrosSeccion.map((item) => Number(item.inspeccion_id)),
+        ...registrosSeccion.map(
+          (item) => Number(item.inspeccion_id),
+        ),
       );
 
       return registrosSeccion.filter(
-        (item) => Number(item.inspeccion_id) === ultimoInspeccionId,
+        (item) =>
+          Number(item.inspeccion_id) ===
+          ultimoInspeccionId,
       );
     };
 
@@ -4428,11 +4458,17 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
     // =================================================
 
     const secciones = {
-      condiciones_inmueble: obtenerUltimaSeccion("condiciones_inmueble"),
+      condiciones_inmueble: obtenerUltimaSeccion(
+        "condiciones_inmueble",
+      ),
 
-      proteccion_incendios: obtenerUltimaSeccion("proteccion_incendios"),
+      proteccion_incendios: obtenerUltimaSeccion(
+        "proteccion_incendios",
+      ),
 
-      ventilacion_iluminacion: obtenerUltimaSeccion("ventilacion_iluminacion"),
+      ventilacion_iluminacion: obtenerUltimaSeccion(
+        "ventilacion_iluminacion",
+      ),
     };
 
     // =================================================
@@ -4464,7 +4500,10 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
       secciones,
     });
   } catch (error) {
-    console.error("ERROR CONSULTANDO REGISTROS SEMANALES POR FECHA:", error);
+    console.error(
+      "ERROR CONSULTANDO REGISTROS SEMANALES POR FECHA:",
+      error,
+    );
 
     return res.status(500).json({
       success: false,
