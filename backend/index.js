@@ -4477,6 +4477,7 @@ app.get("/registros-semanales/:clienteId/:fecha", async (req, res) => {
 
 // =====================================================
 // SEGUIMIENTO DE CONDICIONES INSEGURAS
+// SOLO MUESTRA CONDICIONES PENDIENTES
 // =====================================================
 
 app.get("/seguimiento-condiciones/:clienteId", async (req, res) => {
@@ -4495,59 +4496,64 @@ app.get("/seguimiento-condiciones/:clienteId", async (req, res) => {
     }
 
     // =====================================================
-    // CONSULTAR REGISTROS EN ESTADO MALO
+    // CONSULTAR ÚNICAMENTE CONDICIONES PENDIENTES
+    //
+    // REQUISITOS:
+    // 1. El estado original fue "malo"
+    // 2. La acción todavía NO ha sido corregida
     // =====================================================
 
     const resultado = await db.query(
       `
-  SELECT
-    d.id,
-    d.inspeccion_id,
-    d.seccion,
-    d.nombre_condicion,
-    d.estado,
-    d.condicion,
-    d.accion_correctiva,
-    d.accion_corregida,
-    d.fecha_correccion,
-    d.comentario_correccion,
+      SELECT
+        d.id,
+        d.inspeccion_id,
+        d.seccion,
+        d.nombre_condicion,
+        d.estado,
+        d.condicion,
+        d.accion_correctiva,
+        d.accion_corregida,
+        d.fecha_correccion,
+        d.comentario_correccion,
 
-    i.cliente_id,
-    i.usuario_id,
-    i.nombre_empresa,
-    i.fecha_registro,
-    i.hora_registro,
-    i.created_at,
+        i.cliente_id,
+        i.usuario_id,
+        i.nombre_empresa,
+        i.fecha_registro,
+        i.hora_registro,
+        i.created_at,
 
-    GREATEST(
-      COALESCE(
-        d.fecha_correccion::date,
-        CURRENT_DATE
-      ) - i.fecha_registro,
-      0
-    ) AS dias_transcurridos
+        GREATEST(
+          CURRENT_DATE - i.fecha_registro,
+          0
+        ) AS dias_transcurridos
 
-  FROM inspecciones_semanales_detalle d
+      FROM inspecciones_semanales_detalle d
 
-  INNER JOIN inspecciones_semanales i
-    ON i.id = d.inspeccion_id
+      INNER JOIN inspecciones_semanales i
+        ON i.id = d.inspeccion_id
 
-  WHERE i.cliente_id = $1
-    AND LOWER(d.estado) = 'malo'
+      WHERE i.cliente_id = $1
+        AND LOWER(d.estado) = 'malo'
+        AND COALESCE(d.accion_corregida, FALSE) = FALSE
 
-  ORDER BY
-    d.accion_corregida ASC,
-    i.fecha_registro ASC,
-    d.id ASC
-  `,
+      ORDER BY
+        i.fecha_registro ASC,
+        d.id ASC
+      `,
       [clienteId],
     );
 
     // =====================================================
-    // AGRUPAR POR SECCIÓN
+    // REGISTROS PENDIENTES
     // =====================================================
 
     const registros = resultado.rows;
+
+    // =====================================================
+    // AGRUPAR POR SECCIÓN
+    // =====================================================
 
     const secciones = {
       condiciones_inmueble: registros.filter(
@@ -4572,11 +4578,9 @@ app.get("/seguimiento-condiciones/:clienteId", async (req, res) => {
 
       total: registros.length,
 
-      pendientes: registros.filter((item) => item.accion_corregida === false)
-        .length,
+      pendientes: registros.length,
 
-      corregidos: registros.filter((item) => item.accion_corregida === true)
-        .length,
+      corregidos: 0,
 
       registros,
 
@@ -4587,8 +4591,10 @@ app.get("/seguimiento-condiciones/:clienteId", async (req, res) => {
 
     return res.status(500).json({
       success: false,
+
       error:
         "No fue posible consultar el seguimiento de condiciones inseguras.",
+
       detalle: error.message,
     });
   }
@@ -4598,18 +4604,11 @@ app.get("/seguimiento-condiciones/:clienteId", async (req, res) => {
 // ACTUALIZAR SEGUIMIENTO DE CONDICIÓN INSEGURA
 // =====================================================
 
-// =====================================================
-// ACTUALIZAR SEGUIMIENTO DE CONDICIÓN INSEGURA
-// =====================================================
-
 app.put("/seguimiento-condiciones/:detalleId", async (req, res) => {
   try {
     const { detalleId } = req.params;
 
-    const {
-      accion_corregida,
-      comentario_correccion,
-    } = req.body;
+    const { accion_corregida, comentario_correccion } = req.body;
 
     // =====================================================
     // VALIDAR ID
@@ -4629,8 +4628,7 @@ app.put("/seguimiento-condiciones/:detalleId", async (req, res) => {
     if (typeof accion_corregida !== "boolean") {
       return res.status(400).json({
         success: false,
-        error:
-          "El campo accion_corregida debe ser true o false.",
+        error: "El campo accion_corregida debe ser true o false.",
       });
     }
 
@@ -4687,13 +4685,10 @@ app.put("/seguimiento-condiciones/:detalleId", async (req, res) => {
     // SOLO PERMITIR SEGUIMIENTO DE CONDICIONES MALAS
     // =====================================================
 
-    if (
-      String(registro.estado).toLowerCase() !== "malo"
-    ) {
+    if (String(registro.estado).toLowerCase() !== "malo") {
       return res.status(400).json({
         success: false,
-        error:
-          "Solo se pueden actualizar condiciones registradas como Malo.",
+        error: "Solo se pueden actualizar condiciones registradas como Malo.",
       });
     }
 
@@ -4742,11 +4737,7 @@ app.put("/seguimiento-condiciones/:detalleId", async (req, res) => {
       [
         accion_corregida,
 
-        accion_corregida
-          ? String(
-              comentario_correccion || "",
-            ).trim()
-          : null,
+        accion_corregida ? String(comentario_correccion || "").trim() : null,
 
         detalleId,
       ],
@@ -4762,15 +4753,11 @@ app.put("/seguimiento-condiciones/:detalleId", async (req, res) => {
       registro: resultado.rows[0],
     });
   } catch (error) {
-    console.log(
-      "ERROR ACTUALIZANDO SEGUIMIENTO:",
-      error,
-    );
+    console.log("ERROR ACTUALIZANDO SEGUIMIENTO:", error);
 
     return res.status(500).json({
       success: false,
-      error:
-        "No fue posible actualizar el seguimiento de la condición.",
+      error: "No fue posible actualizar el seguimiento de la condición.",
       detalle: error.message,
     });
   }
