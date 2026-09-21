@@ -4855,6 +4855,582 @@ app.put("/seguimiento-condiciones/:detalleId", async (req, res) => {
   }
 });
 
+// =====================================================
+// TRABAJADORES
+// =====================================================
+
+// =====================================================
+// REGISTRAR TRABAJADOR
+// =====================================================
+
+app.post("/trabajadores", async (req, res) => {
+  try {
+    const {
+      cliente_id,
+      area_id,
+      puesto_id,
+      numero_empleado,
+      nombre,
+      telefono,
+      fecha_ingreso,
+    } = req.body;
+
+    // =================================================
+    // VALIDACIONES
+    // =================================================
+
+    if (!cliente_id || isNaN(Number(cliente_id))) {
+      return res.status(400).json({
+        success: false,
+        error: "Cliente inválido.",
+      });
+    }
+
+    if (!area_id || isNaN(Number(area_id))) {
+      return res.status(400).json({
+        success: false,
+        error: "Área inválida.",
+      });
+    }
+
+    if (!puesto_id || isNaN(Number(puesto_id))) {
+      return res.status(400).json({
+        success: false,
+        error: "Puesto inválido.",
+      });
+    }
+
+    if (!String(nombre || "").trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "El nombre del trabajador es obligatorio.",
+      });
+    }
+
+    // =================================================
+    // VALIDAR QUE EL ÁREA PERTENEZCA AL CLIENTE
+    // =================================================
+
+    const areaResult = await db.query(
+      `
+      SELECT id
+      FROM areas_trabajo
+      WHERE id = $1
+        AND cliente_id = $2
+      `,
+      [area_id, cliente_id],
+    );
+
+    if (areaResult.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "El área seleccionada no pertenece al cliente.",
+      });
+    }
+
+    // =================================================
+    // VALIDAR QUE EL PUESTO PERTENEZCA AL ÁREA
+    // =================================================
+
+    const puestoResult = await db.query(
+      `
+      SELECT id, puesto
+      FROM puestos_trabajo
+      WHERE id = $1
+        AND area_id = $2
+      `,
+      [puesto_id, area_id],
+    );
+
+    if (puestoResult.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "El puesto seleccionado no pertenece al área.",
+      });
+    }
+
+    // =================================================
+    // NORMALIZAR NÚMERO DE EMPLEADO
+    // =================================================
+
+    const numeroEmpleadoNormalizado = String(
+      numero_empleado || "",
+    ).trim();
+
+    // =================================================
+    // VALIDAR NÚMERO DE EMPLEADO DUPLICADO
+    // =================================================
+
+    if (numeroEmpleadoNormalizado) {
+      const empleadoExistente = await db.query(
+        `
+        SELECT id
+        FROM trabajadores
+        WHERE cliente_id = $1
+          AND numero_empleado = $2
+        LIMIT 1
+        `,
+        [cliente_id, numeroEmpleadoNormalizado],
+      );
+
+      if (empleadoExistente.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Ya existe un trabajador con ese número de empleado para este cliente.",
+        });
+      }
+    }
+
+    // =================================================
+    // INSERTAR
+    // =================================================
+
+    const resultado = await db.query(
+      `
+      INSERT INTO trabajadores (
+        cliente_id,
+        area_id,
+        puesto_id,
+        numero_empleado,
+        nombre,
+        telefono,
+        fecha_ingreso,
+        estatus
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        'activo'
+      )
+      RETURNING *
+      `,
+      [
+        cliente_id,
+        area_id,
+        puesto_id,
+        numeroEmpleadoNormalizado || null,
+        String(nombre).trim(),
+        String(telefono || "").trim() || null,
+        fecha_ingreso || null,
+      ],
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Trabajador registrado correctamente.",
+      trabajador: resultado.rows[0],
+    });
+  } catch (error) {
+    console.log("ERROR REGISTRANDO TRABAJADOR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No fue posible registrar el trabajador.",
+      detalle: error.message,
+    });
+  }
+});
+
+
+// =====================================================
+// OBTENER TRABAJADORES DE UN CLIENTE
+// =====================================================
+
+app.get("/trabajadores/:clienteId", async (req, res) => {
+  try {
+    const { clienteId } = req.params;
+
+    if (!clienteId || isNaN(Number(clienteId))) {
+      return res.status(400).json({
+        success: false,
+        error: "Cliente inválido.",
+      });
+    }
+
+    const resultado = await db.query(
+      `
+      SELECT
+        t.id,
+        t.cliente_id,
+        t.area_id,
+        t.puesto_id,
+        t.numero_empleado,
+        t.nombre,
+        t.telefono,
+        t.fecha_ingreso,
+        t.estatus,
+        t.created_at,
+        t.updated_at,
+
+        a.nombre_area,
+
+        p.puesto AS nombre_puesto
+
+      FROM trabajadores t
+
+      INNER JOIN areas_trabajo a
+        ON a.id = t.area_id
+
+      INNER JOIN puestos_trabajo p
+        ON p.id = t.puesto_id
+
+      WHERE t.cliente_id = $1
+
+      ORDER BY
+        a.nombre_area ASC,
+        p.puesto ASC,
+        t.nombre ASC
+      `,
+      [clienteId],
+    );
+
+    return res.json({
+      success: true,
+      total: resultado.rows.length,
+      trabajadores: resultado.rows,
+    });
+  } catch (error) {
+    console.log("ERROR CONSULTANDO TRABAJADORES:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No fue posible consultar los trabajadores.",
+      detalle: error.message,
+    });
+  }
+});
+
+
+// =====================================================
+// OBTENER TRABAJADORES DE UN PUESTO
+// =====================================================
+
+app.get("/trabajadores/puesto/:puestoId", async (req, res) => {
+  try {
+    const { puestoId } = req.params;
+
+    if (!puestoId || isNaN(Number(puestoId))) {
+      return res.status(400).json({
+        success: false,
+        error: "Puesto inválido.",
+      });
+    }
+
+    const resultado = await db.query(
+      `
+      SELECT
+        t.id,
+        t.cliente_id,
+        t.area_id,
+        t.puesto_id,
+        t.numero_empleado,
+        t.nombre,
+        t.telefono,
+        t.fecha_ingreso,
+        t.estatus,
+        t.created_at,
+        t.updated_at,
+
+        a.nombre_area,
+
+        p.puesto AS nombre_puesto
+
+      FROM trabajadores t
+
+      INNER JOIN areas_trabajo a
+        ON a.id = t.area_id
+
+      INNER JOIN puestos_trabajo p
+        ON p.id = t.puesto_id
+
+      WHERE t.puesto_id = $1
+        AND t.estatus = 'activo'
+
+      ORDER BY t.nombre ASC
+      `,
+      [puestoId],
+    );
+
+    return res.json({
+      success: true,
+      total: resultado.rows.length,
+      trabajadores: resultado.rows,
+    });
+  } catch (error) {
+    console.log("ERROR CONSULTANDO TRABAJADORES DEL PUESTO:", error);
+
+    return res.status(500).json({
+      success: false,
+      error:
+        "No fue posible consultar los trabajadores del puesto.",
+      detalle: error.message,
+    });
+  }
+});
+
+
+// =====================================================
+// OBTENER UN TRABAJADOR
+// =====================================================
+
+app.get("/trabajador/:trabajadorId", async (req, res) => {
+  try {
+    const { trabajadorId } = req.params;
+
+    if (!trabajadorId || isNaN(Number(trabajadorId))) {
+      return res.status(400).json({
+        success: false,
+        error: "Trabajador inválido.",
+      });
+    }
+
+    const resultado = await db.query(
+      `
+      SELECT
+        t.*,
+        a.nombre_area,
+        p.puesto AS nombre_puesto
+
+      FROM trabajadores t
+
+      INNER JOIN areas_trabajo a
+        ON a.id = t.area_id
+
+      INNER JOIN puestos_trabajo p
+        ON p.id = t.puesto_id
+
+      WHERE t.id = $1
+      `,
+      [trabajadorId],
+    );
+
+    if (resultado.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Trabajador no encontrado.",
+      });
+    }
+
+    return res.json({
+      success: true,
+      trabajador: resultado.rows[0],
+    });
+  } catch (error) {
+    console.log("ERROR CONSULTANDO TRABAJADOR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No fue posible consultar el trabajador.",
+      detalle: error.message,
+    });
+  }
+});
+
+
+// =====================================================
+// ACTUALIZAR TRABAJADOR
+// =====================================================
+
+app.put("/trabajadores/:trabajadorId", async (req, res) => {
+  try {
+    const { trabajadorId } = req.params;
+
+    const {
+      area_id,
+      puesto_id,
+      numero_empleado,
+      nombre,
+      telefono,
+      fecha_ingreso,
+      estatus,
+    } = req.body;
+
+    if (!trabajadorId || isNaN(Number(trabajadorId))) {
+      return res.status(400).json({
+        success: false,
+        error: "Trabajador inválido.",
+      });
+    }
+
+    if (!area_id || isNaN(Number(area_id))) {
+      return res.status(400).json({
+        success: false,
+        error: "Área inválida.",
+      });
+    }
+
+    if (!puesto_id || isNaN(Number(puesto_id))) {
+      return res.status(400).json({
+        success: false,
+        error: "Puesto inválido.",
+      });
+    }
+
+    if (!String(nombre || "").trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "El nombre del trabajador es obligatorio.",
+      });
+    }
+
+    if (!["activo", "baja"].includes(estatus)) {
+      return res.status(400).json({
+        success: false,
+        error: "Estatus de trabajador inválido.",
+      });
+    }
+
+    // =================================================
+    // BUSCAR TRABAJADOR ACTUAL
+    // =================================================
+
+    const trabajadorActual = await db.query(
+      `
+      SELECT *
+      FROM trabajadores
+      WHERE id = $1
+      `,
+      [trabajadorId],
+    );
+
+    if (trabajadorActual.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Trabajador no encontrado.",
+      });
+    }
+
+    const trabajador = trabajadorActual.rows[0];
+
+    // =================================================
+    // VALIDAR ÁREA
+    // =================================================
+
+    const areaResult = await db.query(
+      `
+      SELECT id
+      FROM areas_trabajo
+      WHERE id = $1
+        AND cliente_id = $2
+      `,
+      [area_id, trabajador.cliente_id],
+    );
+
+    if (areaResult.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "El área seleccionada no pertenece al cliente.",
+      });
+    }
+
+    // =================================================
+    // VALIDAR PUESTO
+    // =================================================
+
+    const puestoResult = await db.query(
+      `
+      SELECT id
+      FROM puestos_trabajo
+      WHERE id = $1
+        AND area_id = $2
+      `,
+      [puesto_id, area_id],
+    );
+
+    if (puestoResult.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "El puesto seleccionado no pertenece al área.",
+      });
+    }
+
+    const numeroEmpleadoNormalizado = String(
+      numero_empleado || "",
+    ).trim();
+
+    // =================================================
+    // VALIDAR DUPLICADO
+    // =================================================
+
+    if (numeroEmpleadoNormalizado) {
+      const duplicado = await db.query(
+        `
+        SELECT id
+        FROM trabajadores
+        WHERE cliente_id = $1
+          AND numero_empleado = $2
+          AND id <> $3
+        LIMIT 1
+        `,
+        [
+          trabajador.cliente_id,
+          numeroEmpleadoNormalizado,
+          trabajadorId,
+        ],
+      );
+
+      if (duplicado.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Ya existe otro trabajador con ese número de empleado.",
+        });
+      }
+    }
+
+    // =================================================
+    // ACTUALIZAR
+    // =================================================
+
+    const resultado = await db.query(
+      `
+      UPDATE trabajadores
+      SET
+        area_id = $1,
+        puesto_id = $2,
+        numero_empleado = $3,
+        nombre = $4,
+        telefono = $5,
+        fecha_ingreso = $6,
+        estatus = $7,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $8
+      RETURNING *
+      `,
+      [
+        area_id,
+        puesto_id,
+        numeroEmpleadoNormalizado || null,
+        String(nombre).trim(),
+        String(telefono || "").trim() || null,
+        fecha_ingreso || null,
+        estatus,
+        trabajadorId,
+      ],
+    );
+
+    return res.json({
+      success: true,
+      message: "Trabajador actualizado correctamente.",
+      trabajador: resultado.rows[0],
+    });
+  } catch (error) {
+    console.log("ERROR ACTUALIZANDO TRABAJADOR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No fue posible actualizar el trabajador.",
+      detalle: error.message,
+    });
+  }
+});
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
