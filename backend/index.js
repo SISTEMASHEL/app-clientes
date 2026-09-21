@@ -1816,7 +1816,36 @@ app.delete("/clientes/:id", async (req, res) => {
     }
 
     // ==================================================
-    // 2. ELIMINAR INVENTARIO
+    // 2. ELIMINAR ENTREGAS DE EPP
+    //
+    // entregas_epp_detalle se elimina automáticamente
+    // por ON DELETE CASCADE desde entregas_epp.
+    // Debe hacerse antes de eliminar inventario y trabajadores.
+    // ==================================================
+
+    await client.query(
+      `
+      DELETE FROM entregas_epp
+      WHERE cliente_id = $1
+      `,
+      [clienteId],
+    );
+
+    // ==================================================
+    // 3. ELIMINAR TRABAJADORES
+    // Debe hacerse antes de eliminar puestos y áreas.
+    // ==================================================
+
+    await client.query(
+      `
+      DELETE FROM trabajadores
+      WHERE cliente_id = $1
+      `,
+      [clienteId],
+    );
+
+    // ==================================================
+    // 4. ELIMINAR INVENTARIO
     // ==================================================
 
     await client.query(
@@ -5430,6 +5459,722 @@ app.put("/trabajadores/:trabajadorId", async (req, res) => {
     });
   }
 });
+
+
+// =====================================================
+// ENTREGAS DE EPP A TRABAJADORES
+// =====================================================
+
+// =====================================================
+// REGISTRAR ENTREGA DE EPP
+//
+// - Valida trabajador
+// - Valida usuario
+// - Valida inventario del mismo cliente / área / puesto
+// - Bloquea existencias con FOR UPDATE
+// - Registra cabecera y detalle
+// - Descuenta cantidad_total
+// - Todo ocurre en una sola transacción PostgreSQL
+// =====================================================
+
+app.post("/entregas-epp", async (req, res) => {
+  const client = await db.connect();
+
+  try {
+    const {
+      cliente_id,
+      trabajador_id,
+      usuario_id,
+      fecha_entrega,
+      motivo,
+      observaciones,
+      productos,
+    } = req.body;
+
+    // =================================================
+    // VALIDACIONES BÁSICAS
+    // =================================================
+
+    if (!cliente_id || isNaN(Number(cliente_id))) {
+      return res.status(400).json({
+        success: false,
+        error: "Cliente inválido.",
+      });
+    }
+
+    if (!trabajador_id || isNaN(Number(trabajador_id))) {
+      return res.status(400).json({
+        success: false,
+        error: "Trabajador inválido.",
+      });
+    }
+
+    if (!usuario_id || isNaN(Number(usuario_id))) {
+      return res.status(400).json({
+        success: false,
+        error: "Usuario inválido.",
+      });
+    }
+
+    if (!Array.isArray(productos) || productos.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Debes seleccionar por lo menos un producto de EPP.",
+      });
+    }
+
+    // Normalizar productos y evitar que el mismo inventario
+    // llegue repetido en una misma entrega.
+    const productosAgrupados = new Map();
+
+    for (const producto of productos) {
+      const inventarioId = Number(producto?.inventario_id);
+      const cantidad = Number(producto?.cantidad);
+
+      if (!Number.isInteger(inventarioId) || inventarioId <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Uno de los productos tiene un inventario_id inválido.",
+        });
+      }
+
+      if (!Number.isInteger(cantidad) || cantidad <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Todas las cantidades deben ser números enteros mayores a cero.",
+        });
+      }
+
+      productosAgrupados.set(
+        inventarioId,
+        (productosAgrupados.get(inventarioId) || 0) + cantidad,
+      );
+    }
+
+    const productosNormalizados = Array.from(
+      productosAgrupados,
+      ([inventario_id, cantidad]) => ({
+        inventario_id,
+        cantidad,
+      }),
+    );
+
+    await client.query("BEGIN");
+
+    // =================================================
+    // VALIDAR TRABAJADOR Y OBTENER SU ÁREA / PUESTO
+    // =================================================
+
+    const trabajadorResult = await client.query(
+      `
+      SELECT
+        t.id,
+        t.cliente_id,
+        t.area_id,
+        t.puesto_id,
+        t.numero_empleado,
+        t.nombre,
+        t.estatus,
+        a.nombre_area,
+        p.puesto AS nombre_puesto
+      FROM trabajadores t
+      INNER JOIN areas_trabajo a
+        ON a.id = t.area_id
+      INNER JOIN puestos_trabajo p
+        ON p.id = t.puesto_id
+      WHERE t.id = $1
+        AND t.cliente_id = $2
+      FOR UPDATE OF t
+      `,
+      [trabajador_id, cliente_id],
+    );
+
+    if (trabajadorResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        success: false,
+        error: "El trabajador no existe o no pertenece al cliente.",
+      });
+    }
+
+    const trabajador = trabajadorResult.rows[0];
+
+    if (trabajador.estatus !== "activo") {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        success: false,
+        error: "No se puede entregar EPP a un trabajador dado de baja.",
+      });
+    }
+
+    // =================================================
+    // VALIDAR USUARIO
+    // =================================================
+
+    const usuarioResult = await client.query(
+      `
+      SELECT id, usuario
+      FROM usuarios
+      WHERE id = $1
+      `,
+      [usuario_id],
+    );
+
+    if (usuarioResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        success: false,
+        error: "El usuario que registra la entrega no existe.",
+      });
+    }
+
+    // =================================================
+    // BLOQUEAR Y VALIDAR INVENTARIO
+    //
+    // Se ordenan los IDs antes de bloquearlos para reducir
+    // el riesgo de deadlocks en entregas simultáneas.
+    // =================================================
+
+    const productosOrdenados = [...productosNormalizados].sort(
+      (a, b) => a.inventario_id - b.inventario_id,
+    );
+
+    const productosValidados = [];
+
+    for (const productoSolicitado of productosOrdenados) {
+      const inventarioResult = await client.query(
+        `
+        SELECT
+          id,
+          cliente_id,
+          area_id,
+          puesto_id,
+          clave_producto,
+          nombre_producto,
+          marca,
+          tipo_producto,
+          cantidad_total,
+          cantidad_min,
+          cantidad_max
+        FROM inventario
+        WHERE id = $1
+        FOR UPDATE
+        `,
+        [productoSolicitado.inventario_id],
+      );
+
+      if (inventarioResult.rows.length === 0) {
+        await client.query("ROLLBACK");
+
+        return res.status(404).json({
+          success: false,
+          error: `El producto de inventario ${productoSolicitado.inventario_id} no existe.`,
+        });
+      }
+
+      const inventario = inventarioResult.rows[0];
+
+      if (Number(inventario.cliente_id) !== Number(cliente_id)) {
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          success: false,
+          error: `El producto "${inventario.nombre_producto}" no pertenece al cliente.`,
+        });
+      }
+
+      if (Number(inventario.area_id) !== Number(trabajador.area_id)) {
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          success: false,
+          error: `El producto "${inventario.nombre_producto}" no pertenece al área actual del trabajador.`,
+        });
+      }
+
+      if (Number(inventario.puesto_id) !== Number(trabajador.puesto_id)) {
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          success: false,
+          error: `El producto "${inventario.nombre_producto}" no pertenece al puesto actual del trabajador.`,
+        });
+      }
+
+      const existencia = Number(inventario.cantidad_total || 0);
+
+      if (existencia < productoSolicitado.cantidad) {
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          success: false,
+          error: `Stock insuficiente para "${inventario.nombre_producto}". Disponible: ${existencia}. Solicitado: ${productoSolicitado.cantidad}.`,
+          inventario_id: inventario.id,
+          disponible: existencia,
+          solicitado: productoSolicitado.cantidad,
+        });
+      }
+
+      productosValidados.push({
+        ...inventario,
+        cantidad_entregar: productoSolicitado.cantidad,
+      });
+    }
+
+    // =================================================
+    // CREAR CABECERA DE ENTREGA
+    // Guarda área y puesto como referencia histórica
+    // del momento exacto de la entrega.
+    // =================================================
+
+    const entregaResult = await client.query(
+      `
+      INSERT INTO entregas_epp (
+        cliente_id,
+        trabajador_id,
+        usuario_id,
+        area_id,
+        puesto_id,
+        fecha_entrega,
+        motivo,
+        observaciones
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        COALESCE($6::date, CURRENT_DATE),
+        $7,
+        $8
+      )
+      RETURNING *
+      `,
+      [
+        cliente_id,
+        trabajador_id,
+        usuario_id,
+        trabajador.area_id,
+        trabajador.puesto_id,
+        fecha_entrega || null,
+        String(motivo || "").trim() || "Entrega inicial",
+        String(observaciones || "").trim() || null,
+      ],
+    );
+
+    const entrega = entregaResult.rows[0];
+
+    // =================================================
+    // INSERTAR DETALLES Y DESCONTAR INVENTARIO
+    // =================================================
+
+    const detallesGuardados = [];
+
+    for (const producto of productosValidados) {
+      const detalleResult = await client.query(
+        `
+        INSERT INTO entregas_epp_detalle (
+          entrega_id,
+          inventario_id,
+          clave_producto,
+          nombre_producto,
+          cantidad
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+        `,
+        [
+          entrega.id,
+          producto.id,
+          producto.clave_producto,
+          producto.nombre_producto,
+          producto.cantidad_entregar,
+        ],
+      );
+
+      const inventarioActualizado = await client.query(
+        `
+        UPDATE inventario
+        SET cantidad_total = cantidad_total - $1
+        WHERE id = $2
+        RETURNING
+          id,
+          clave_producto,
+          nombre_producto,
+          cantidad_total,
+          cantidad_min,
+          cantidad_max
+        `,
+        [producto.cantidad_entregar, producto.id],
+      );
+
+      detallesGuardados.push({
+        ...detalleResult.rows[0],
+        inventario: inventarioActualizado.rows[0],
+      });
+    }
+
+    await client.query("COMMIT");
+
+    return res.status(201).json({
+      success: true,
+      message: "Entrega de EPP registrada correctamente.",
+      entrega: {
+        ...entrega,
+        trabajador_nombre: trabajador.nombre,
+        numero_empleado: trabajador.numero_empleado,
+        nombre_area: trabajador.nombre_area,
+        nombre_puesto: trabajador.nombre_puesto,
+        usuario_registro: usuarioResult.rows[0].usuario,
+      },
+      detalles: detallesGuardados,
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.log("ERROR HACIENDO ROLLBACK ENTREGA EPP:", rollbackError);
+    }
+
+    console.log("ERROR REGISTRANDO ENTREGA EPP:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No fue posible registrar la entrega de EPP.",
+      detalle: error.message,
+    });
+  } finally {
+    client.release();
+  }
+});
+
+
+// =====================================================
+// BITÁCORA DE ENTREGAS POR TRABAJADOR
+// =====================================================
+
+app.get("/entregas-epp/trabajador/:trabajadorId", async (req, res) => {
+  try {
+    const { trabajadorId } = req.params;
+
+    if (!trabajadorId || isNaN(Number(trabajadorId))) {
+      return res.status(400).json({
+        success: false,
+        error: "Trabajador inválido.",
+      });
+    }
+
+    const trabajadorResult = await db.query(
+      `
+      SELECT
+        t.id,
+        t.cliente_id,
+        t.area_id,
+        t.puesto_id,
+        t.numero_empleado,
+        t.nombre,
+        t.telefono,
+        t.fecha_ingreso,
+        t.estatus,
+        a.nombre_area,
+        p.puesto AS nombre_puesto
+      FROM trabajadores t
+      INNER JOIN areas_trabajo a
+        ON a.id = t.area_id
+      INNER JOIN puestos_trabajo p
+        ON p.id = t.puesto_id
+      WHERE t.id = $1
+      `,
+      [trabajadorId],
+    );
+
+    if (trabajadorResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Trabajador no encontrado.",
+      });
+    }
+
+    const entregasResult = await db.query(
+      `
+      SELECT
+        e.id,
+        e.cliente_id,
+        e.trabajador_id,
+        e.usuario_id,
+        e.area_id,
+        e.puesto_id,
+        e.fecha_entrega,
+        e.motivo,
+        e.observaciones,
+        e.created_at,
+
+        a.nombre_area,
+        p.puesto AS nombre_puesto,
+        u.usuario AS usuario_registro,
+
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'id', d.id,
+              'inventario_id', d.inventario_id,
+              'clave_producto', d.clave_producto,
+              'nombre_producto', d.nombre_producto,
+              'cantidad', d.cantidad,
+              'created_at', d.created_at
+            )
+            ORDER BY d.id
+          ) FILTER (WHERE d.id IS NOT NULL),
+          '[]'::json
+        ) AS productos
+
+      FROM entregas_epp e
+
+      INNER JOIN areas_trabajo a
+        ON a.id = e.area_id
+
+      INNER JOIN puestos_trabajo p
+        ON p.id = e.puesto_id
+
+      INNER JOIN usuarios u
+        ON u.id = e.usuario_id
+
+      LEFT JOIN entregas_epp_detalle d
+        ON d.entrega_id = e.id
+
+      WHERE e.trabajador_id = $1
+
+      GROUP BY
+        e.id,
+        a.nombre_area,
+        p.puesto,
+        u.usuario
+
+      ORDER BY
+        e.fecha_entrega DESC,
+        e.created_at DESC,
+        e.id DESC
+      `,
+      [trabajadorId],
+    );
+
+    return res.json({
+      success: true,
+      trabajador: trabajadorResult.rows[0],
+      total_entregas: entregasResult.rows.length,
+      entregas: entregasResult.rows,
+    });
+  } catch (error) {
+    console.log("ERROR CONSULTANDO BITÁCORA EPP:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No fue posible consultar la bitácora de EPP.",
+      detalle: error.message,
+    });
+  }
+});
+
+
+// =====================================================
+// CONSULTAR UNA ENTREGA DE EPP
+// =====================================================
+
+app.get("/entregas-epp/:entregaId", async (req, res) => {
+  try {
+    const { entregaId } = req.params;
+
+    if (!entregaId || isNaN(Number(entregaId))) {
+      return res.status(400).json({
+        success: false,
+        error: "Entrega inválida.",
+      });
+    }
+
+    const entregaResult = await db.query(
+      `
+      SELECT
+        e.*,
+
+        t.numero_empleado,
+        t.nombre AS trabajador_nombre,
+
+        a.nombre_area,
+        p.puesto AS nombre_puesto,
+
+        u.usuario AS usuario_registro
+
+      FROM entregas_epp e
+
+      INNER JOIN trabajadores t
+        ON t.id = e.trabajador_id
+
+      INNER JOIN areas_trabajo a
+        ON a.id = e.area_id
+
+      INNER JOIN puestos_trabajo p
+        ON p.id = e.puesto_id
+
+      INNER JOIN usuarios u
+        ON u.id = e.usuario_id
+
+      WHERE e.id = $1
+      `,
+      [entregaId],
+    );
+
+    if (entregaResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Entrega de EPP no encontrada.",
+      });
+    }
+
+    const detalleResult = await db.query(
+      `
+      SELECT
+        id,
+        entrega_id,
+        inventario_id,
+        clave_producto,
+        nombre_producto,
+        cantidad,
+        created_at
+      FROM entregas_epp_detalle
+      WHERE entrega_id = $1
+      ORDER BY id ASC
+      `,
+      [entregaId],
+    );
+
+    return res.json({
+      success: true,
+      entrega: entregaResult.rows[0],
+      productos: detalleResult.rows,
+    });
+  } catch (error) {
+    console.log("ERROR CONSULTANDO ENTREGA EPP:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No fue posible consultar la entrega de EPP.",
+      detalle: error.message,
+    });
+  }
+});
+
+
+// =====================================================
+// INVENTARIO DISPONIBLE PARA UN TRABAJADOR
+//
+// Devuelve únicamente productos:
+// - del mismo cliente
+// - de la misma área
+// - del mismo puesto
+// - con existencia mayor a cero
+// =====================================================
+
+app.get(
+  "/entregas-epp/inventario-trabajador/:trabajadorId",
+  async (req, res) => {
+    try {
+      const { trabajadorId } = req.params;
+
+      if (!trabajadorId || isNaN(Number(trabajadorId))) {
+        return res.status(400).json({
+          success: false,
+          error: "Trabajador inválido.",
+        });
+      }
+
+      const trabajadorResult = await db.query(
+        `
+        SELECT
+          id,
+          cliente_id,
+          area_id,
+          puesto_id,
+          nombre,
+          estatus
+        FROM trabajadores
+        WHERE id = $1
+        `,
+        [trabajadorId],
+      );
+
+      if (trabajadorResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: "Trabajador no encontrado.",
+        });
+      }
+
+      const trabajador = trabajadorResult.rows[0];
+
+      const inventarioResult = await db.query(
+        `
+        SELECT
+          id,
+          clave_producto,
+          nombre_producto,
+          marca,
+          descripcion,
+          tipo_producto,
+          cantidad_total,
+          cantidad_min,
+          cantidad_max,
+          ficha_tecnica,
+          certificado,
+          cliente_id,
+          area_id,
+          puesto_id
+        FROM inventario
+        WHERE cliente_id = $1
+          AND area_id = $2
+          AND puesto_id = $3
+          AND cantidad_total > 0
+        ORDER BY nombre_producto ASC, clave_producto ASC
+        `,
+        [
+          trabajador.cliente_id,
+          trabajador.area_id,
+          trabajador.puesto_id,
+        ],
+      );
+
+      return res.json({
+        success: true,
+        trabajador: {
+          id: trabajador.id,
+          nombre: trabajador.nombre,
+          estatus: trabajador.estatus,
+          cliente_id: trabajador.cliente_id,
+          area_id: trabajador.area_id,
+          puesto_id: trabajador.puesto_id,
+        },
+        total: inventarioResult.rows.length,
+        inventario: inventarioResult.rows,
+      });
+    } catch (error) {
+      console.log(
+        "ERROR CONSULTANDO INVENTARIO PARA TRABAJADOR:",
+        error,
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "No fue posible consultar el inventario disponible para el trabajador.",
+        detalle: error.message,
+      });
+    }
+  },
+);
+
 
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
