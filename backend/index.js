@@ -704,23 +704,86 @@ const upload = multer({
 
 // ------------------- RUTAS (TODO IGUAL) -------------------
 
+// =====================================================
 // LOGIN
+// DEVUELVE TAMBIÉN EL ROL DEL USUARIO
+// =====================================================
+
 app.post("/login", async (req, res) => {
   try {
     const { usuario, password } = req.body;
 
+    // ================================================
+    // VALIDAR CAMPOS
+    // ================================================
+
+    if (!usuario || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Usuario y contraseña son requeridos",
+        usuario: null,
+      });
+    }
+
+    // ================================================
+    // BUSCAR USUARIO
+    // ================================================
+
     const result = await db.query(
-      "SELECT * FROM usuarios WHERE usuario = $1 AND password = $2",
+      `
+      SELECT
+        id,
+        usuario,
+        rol
+      FROM usuarios
+      WHERE usuario = $1
+        AND password = $2
+      LIMIT 1
+      `,
       [usuario, password],
     );
 
-    res.json({
-      success: result.rows.length > 0,
-      usuario: result.rows[0] || null,
+    // ================================================
+    // CREDENCIALES INCORRECTAS
+    // ================================================
+
+    if (result.rows.length === 0) {
+      return res.json({
+        success: false,
+        message: "Usuario o contraseña incorrectos",
+        usuario: null,
+      });
+    }
+
+    // ================================================
+    // LOGIN CORRECTO
+    // ================================================
+
+    const usuarioEncontrado = result.rows[0];
+
+    console.log("====================================");
+    console.log("LOGIN CORRECTO");
+    console.log("USUARIO ID:", usuarioEncontrado.id);
+    console.log("USUARIO:", usuarioEncontrado.usuario);
+    console.log("ROL:", usuarioEncontrado.rol);
+    console.log("====================================");
+
+    return res.json({
+      success: true,
+      usuario: {
+        id: usuarioEncontrado.id,
+        usuario: usuarioEncontrado.usuario,
+        rol: usuarioEncontrado.rol || "usuario",
+      },
     });
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ success: false });
+    console.error("ERROR EN LOGIN:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Error interno al iniciar sesión",
+      usuario: null,
+    });
   }
 });
 
