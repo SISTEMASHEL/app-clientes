@@ -706,7 +706,7 @@ const upload = multer({
 
 // =====================================================
 // LOGIN
-// DEVUELVE TAMBIÉN EL ROL DEL USUARIO
+// DEVUELVE ROL Y CLIENTE ASIGNADO
 // =====================================================
 
 app.post("/login", async (req, res) => {
@@ -732,12 +732,16 @@ app.post("/login", async (req, res) => {
     const result = await db.query(
       `
       SELECT
-        id,
-        usuario,
-        rol
-      FROM usuarios
-      WHERE usuario = $1
-        AND password = $2
+        u.id,
+        u.usuario,
+        u.rol,
+        u.cliente_id,
+        c.nombre_empresa AS nombre_cliente
+      FROM usuarios u
+      LEFT JOIN clientes c
+        ON c.id = u.cliente_id
+      WHERE u.usuario = $1
+        AND u.password = $2
       LIMIT 1
       `,
       [usuario, password],
@@ -755,25 +759,47 @@ app.post("/login", async (req, res) => {
       });
     }
 
+    const usuarioEncontrado = result.rows[0];
+
+    // ================================================
+    // VALIDAR USUARIO RH
+    // ================================================
+
+    if (
+      usuarioEncontrado.rol === "rh" &&
+      !usuarioEncontrado.cliente_id
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "El usuario de Recursos Humanos no tiene un cliente asignado.",
+        usuario: null,
+      });
+    }
+
     // ================================================
     // LOGIN CORRECTO
     // ================================================
-
-    const usuarioEncontrado = result.rows[0];
 
     console.log("====================================");
     console.log("LOGIN CORRECTO");
     console.log("USUARIO ID:", usuarioEncontrado.id);
     console.log("USUARIO:", usuarioEncontrado.usuario);
     console.log("ROL:", usuarioEncontrado.rol);
+    console.log("CLIENTE ID:", usuarioEncontrado.cliente_id);
+    console.log("CLIENTE:", usuarioEncontrado.nombre_cliente);
     console.log("====================================");
 
     return res.json({
       success: true,
+
       usuario: {
         id: usuarioEncontrado.id,
         usuario: usuarioEncontrado.usuario,
         rol: usuarioEncontrado.rol || "usuario",
+
+        cliente_id: usuarioEncontrado.cliente_id || null,
+        nombre_cliente: usuarioEncontrado.nombre_cliente || null,
       },
     });
   } catch (error) {
