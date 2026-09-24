@@ -765,14 +765,10 @@ app.post("/login", async (req, res) => {
     // VALIDAR USUARIO RH
     // ================================================
 
-    if (
-      usuarioEncontrado.rol === "rh" &&
-      !usuarioEncontrado.cliente_id
-    ) {
+    if (usuarioEncontrado.rol === "rh" && !usuarioEncontrado.cliente_id) {
       return res.status(403).json({
         success: false,
-        message:
-          "El usuario de Recursos Humanos no tiene un cliente asignado.",
+        message: "El usuario de Recursos Humanos no tiene un cliente asignado.",
         usuario: null,
       });
     }
@@ -2125,14 +2121,34 @@ app.delete("/clientes/:id", async (req, res) => {
     }
 
     // ==================================================
-    // 16. ELIMINAR CLIENTE
+    // 16. DESVINCULAR USUARIOS ASOCIADOS AL CLIENTE
+    //
+    // IMPORTANTE:
+    // usuarios.cliente_id se utiliza para relacionar
+    // usuarios de Recursos Humanos con su empresa.
+    //
+    // Antes de eliminar el cliente dejamos cliente_id
+    // en NULL para evitar problemas con la FK.
     // ==================================================
 
     await client.query(
       `
-      DELETE FROM clientes
-      WHERE id = $1
-      `,
+  UPDATE usuarios
+  SET cliente_id = NULL
+  WHERE cliente_id = $1
+  `,
+      [clienteId],
+    );
+
+    // ==================================================
+    // 17. ELIMINAR CLIENTE
+    // ==================================================
+
+    await client.query(
+      `
+  DELETE FROM clientes
+  WHERE id = $1
+  `,
       [clienteId],
     );
 
@@ -5081,28 +5097,21 @@ app.post("/trabajadores", async (req, res) => {
     // NORMALIZAR DATOS
     // =================================================
 
-    const numeroEmpleadoNormalizado = String(
-      numero_empleado || "",
-    ).trim();
+    const numeroEmpleadoNormalizado = String(numero_empleado || "").trim();
 
     const nssNormalizado = normalizarNss(nss);
 
     const curpNormalizada = normalizarCurp(curp);
 
-    const tipoSangreNormalizado =
-      normalizarTipoSangre(tipo_sangre);
+    const tipoSangreNormalizado = normalizarTipoSangre(tipo_sangre);
 
-    const telefonoNormalizado =
-      normalizarTextoOpcional(telefono);
+    const telefonoNormalizado = normalizarTextoOpcional(telefono);
 
     // =================================================
     // VALIDAR NSS
     // =================================================
 
-    if (
-      nssNormalizado &&
-      !/^\d{11}$/.test(nssNormalizado)
-    ) {
+    if (nssNormalizado && !/^\d{11}$/.test(nssNormalizado)) {
       return res.status(400).json({
         success: false,
         error:
@@ -5114,10 +5123,7 @@ app.post("/trabajadores", async (req, res) => {
     // VALIDAR CURP
     // =================================================
 
-    if (
-      curpNormalizada &&
-      curpNormalizada.length !== 18
-    ) {
+    if (curpNormalizada && curpNormalizada.length !== 18) {
       return res.status(400).json({
         success: false,
         error: "La CURP debe contener exactamente 18 caracteres.",
@@ -5141,9 +5147,7 @@ app.post("/trabajadores", async (req, res) => {
 
     if (
       tipoSangreNormalizado &&
-      !tiposSangrePermitidos.includes(
-        tipoSangreNormalizado,
-      )
+      !tiposSangrePermitidos.includes(tipoSangreNormalizado)
     ) {
       return res.status(400).json({
         success: false,
@@ -5158,8 +5162,7 @@ app.post("/trabajadores", async (req, res) => {
     if (!fechaValidaFormato(fecha_nacimiento)) {
       return res.status(400).json({
         success: false,
-        error:
-          "La fecha de nacimiento debe tener formato AAAA-MM-DD.",
+        error: "La fecha de nacimiento debe tener formato AAAA-MM-DD.",
       });
     }
 
@@ -5170,8 +5173,7 @@ app.post("/trabajadores", async (req, res) => {
     if (!fechaValidaFormato(fecha_ingreso)) {
       return res.status(400).json({
         success: false,
-        error:
-          "La fecha de ingreso debe tener formato AAAA-MM-DD.",
+        error: "La fecha de ingreso debe tener formato AAAA-MM-DD.",
       });
     }
 
@@ -5192,8 +5194,7 @@ app.post("/trabajadores", async (req, res) => {
     if (areaResult.rows.length === 0) {
       return res.status(400).json({
         success: false,
-        error:
-          "El área seleccionada no pertenece al cliente.",
+        error: "El área seleccionada no pertenece al cliente.",
       });
     }
 
@@ -5216,8 +5217,7 @@ app.post("/trabajadores", async (req, res) => {
     if (puestoResult.rows.length === 0) {
       return res.status(400).json({
         success: false,
-        error:
-          "El puesto seleccionado no pertenece al área.",
+        error: "El puesto seleccionado no pertenece al área.",
       });
     }
 
@@ -5234,10 +5234,7 @@ app.post("/trabajadores", async (req, res) => {
           AND numero_empleado = $2
         LIMIT 1
         `,
-        [
-          cliente_id,
-          numeroEmpleadoNormalizado,
-        ],
+        [cliente_id, numeroEmpleadoNormalizado],
       );
 
       if (empleadoExistente.rows.length > 0) {
@@ -5267,8 +5264,7 @@ app.post("/trabajadores", async (req, res) => {
       if (curpExistente.rows.length > 0) {
         return res.status(400).json({
           success: false,
-          error:
-            "Ya existe un trabajador registrado con esa CURP.",
+          error: "Ya existe un trabajador registrado con esa CURP.",
         });
       }
     }
@@ -5291,8 +5287,7 @@ app.post("/trabajadores", async (req, res) => {
       if (nssExistente.rows.length > 0) {
         return res.status(400).json({
           success: false,
-          error:
-            "Ya existe un trabajador registrado con ese NSS.",
+          error: "Ya existe un trabajador registrado con ese NSS.",
         });
       }
     }
@@ -5363,20 +5358,15 @@ app.post("/trabajadores", async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message:
-        "Trabajador registrado correctamente.",
+      message: "Trabajador registrado correctamente.",
       trabajador: resultado.rows[0],
     });
   } catch (error) {
-    console.log(
-      "ERROR REGISTRANDO TRABAJADOR:",
-      error,
-    );
+    console.log("ERROR REGISTRANDO TRABAJADOR:", error);
 
     return res.status(500).json({
       success: false,
-      error:
-        "No fue posible registrar el trabajador.",
+      error: "No fue posible registrar el trabajador.",
       detalle: error.message,
     });
   }
@@ -5390,10 +5380,7 @@ app.get("/trabajadores/:clienteId", async (req, res) => {
   try {
     const { clienteId } = req.params;
 
-    if (
-      !clienteId ||
-      isNaN(Number(clienteId))
-    ) {
+    if (!clienteId || isNaN(Number(clienteId))) {
       return res.status(400).json({
         success: false,
         error: "Cliente inválido.",
@@ -5450,15 +5437,11 @@ app.get("/trabajadores/:clienteId", async (req, res) => {
       trabajadores: resultado.rows,
     });
   } catch (error) {
-    console.log(
-      "ERROR CONSULTANDO TRABAJADORES:",
-      error,
-    );
+    console.log("ERROR CONSULTANDO TRABAJADORES:", error);
 
     return res.status(500).json({
       success: false,
-      error:
-        "No fue posible consultar los trabajadores.",
+      error: "No fue posible consultar los trabajadores.",
       detalle: error.message,
     });
   }
@@ -5468,24 +5451,19 @@ app.get("/trabajadores/:clienteId", async (req, res) => {
 // OBTENER TRABAJADORES DE UN PUESTO
 // =====================================================
 
-app.get(
-  "/trabajadores/puesto/:puestoId",
-  async (req, res) => {
-    try {
-      const { puestoId } = req.params;
+app.get("/trabajadores/puesto/:puestoId", async (req, res) => {
+  try {
+    const { puestoId } = req.params;
 
-      if (
-        !puestoId ||
-        isNaN(Number(puestoId))
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: "Puesto inválido.",
-        });
-      }
+    if (!puestoId || isNaN(Number(puestoId))) {
+      return res.status(400).json({
+        success: false,
+        error: "Puesto inválido.",
+      });
+    }
 
-      const resultado = await db.query(
-        `
+    const resultado = await db.query(
+      `
         SELECT
           t.id,
           t.cliente_id,
@@ -5523,52 +5501,42 @@ app.get(
 
         ORDER BY t.nombre ASC
         `,
-        [puestoId],
-      );
+      [puestoId],
+    );
 
-      return res.json({
-        success: true,
-        total: resultado.rows.length,
-        trabajadores: resultado.rows,
-      });
-    } catch (error) {
-      console.log(
-        "ERROR CONSULTANDO TRABAJADORES DEL PUESTO:",
-        error,
-      );
+    return res.json({
+      success: true,
+      total: resultado.rows.length,
+      trabajadores: resultado.rows,
+    });
+  } catch (error) {
+    console.log("ERROR CONSULTANDO TRABAJADORES DEL PUESTO:", error);
 
-      return res.status(500).json({
-        success: false,
-        error:
-          "No fue posible consultar los trabajadores del puesto.",
-        detalle: error.message,
-      });
-    }
-  },
-);
+    return res.status(500).json({
+      success: false,
+      error: "No fue posible consultar los trabajadores del puesto.",
+      detalle: error.message,
+    });
+  }
+});
 
 // =====================================================
 // OBTENER UN TRABAJADOR
 // =====================================================
 
-app.get(
-  "/trabajador/:trabajadorId",
-  async (req, res) => {
-    try {
-      const { trabajadorId } = req.params;
+app.get("/trabajador/:trabajadorId", async (req, res) => {
+  try {
+    const { trabajadorId } = req.params;
 
-      if (
-        !trabajadorId ||
-        isNaN(Number(trabajadorId))
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: "Trabajador inválido.",
-        });
-      }
+    if (!trabajadorId || isNaN(Number(trabajadorId))) {
+      return res.status(400).json({
+        success: false,
+        error: "Trabajador inválido.",
+      });
+    }
 
-      const resultado = await db.query(
-        `
+    const resultado = await db.query(
+      `
         SELECT
           t.*,
           a.nombre_area,
@@ -5584,292 +5552,248 @@ app.get(
 
         WHERE t.id = $1
         `,
-        [trabajadorId],
-      );
+      [trabajadorId],
+    );
 
-      if (resultado.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          error: "Trabajador no encontrado.",
-        });
-      }
-
-      return res.json({
-        success: true,
-        trabajador: resultado.rows[0],
-      });
-    } catch (error) {
-      console.log(
-        "ERROR CONSULTANDO TRABAJADOR:",
-        error,
-      );
-
-      return res.status(500).json({
+    if (resultado.rows.length === 0) {
+      return res.status(404).json({
         success: false,
-        error:
-          "No fue posible consultar el trabajador.",
-        detalle: error.message,
+        error: "Trabajador no encontrado.",
       });
     }
-  },
-);
+
+    return res.json({
+      success: true,
+      trabajador: resultado.rows[0],
+    });
+  } catch (error) {
+    console.log("ERROR CONSULTANDO TRABAJADOR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No fue posible consultar el trabajador.",
+      detalle: error.message,
+    });
+  }
+});
 
 // =====================================================
 // ACTUALIZAR TRABAJADOR
 // =====================================================
 
-app.put(
-  "/trabajadores/:trabajadorId",
-  async (req, res) => {
-    try {
-      const { trabajadorId } = req.params;
+app.put("/trabajadores/:trabajadorId", async (req, res) => {
+  try {
+    const { trabajadorId } = req.params;
 
-      const {
-        area_id,
-        puesto_id,
-        numero_empleado,
-        nombre,
-        telefono,
-        fecha_ingreso,
-        estatus,
+    const {
+      area_id,
+      puesto_id,
+      numero_empleado,
+      nombre,
+      telefono,
+      fecha_ingreso,
+      estatus,
 
-        // =============================================
-        // NUEVOS DATOS
-        // =============================================
+      // =============================================
+      // NUEVOS DATOS
+      // =============================================
 
-        nss,
-        tipo_sangre,
-        fecha_nacimiento,
-        curp,
-      } = req.body;
+      nss,
+      tipo_sangre,
+      fecha_nacimiento,
+      curp,
+    } = req.body;
 
-      // =================================================
-      // VALIDACIONES BÁSICAS
-      // =================================================
+    // =================================================
+    // VALIDACIONES BÁSICAS
+    // =================================================
 
-      if (
-        !trabajadorId ||
-        isNaN(Number(trabajadorId))
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: "Trabajador inválido.",
-        });
-      }
+    if (!trabajadorId || isNaN(Number(trabajadorId))) {
+      return res.status(400).json({
+        success: false,
+        error: "Trabajador inválido.",
+      });
+    }
 
-      if (!area_id || isNaN(Number(area_id))) {
-        return res.status(400).json({
-          success: false,
-          error: "Área inválida.",
-        });
-      }
+    if (!area_id || isNaN(Number(area_id))) {
+      return res.status(400).json({
+        success: false,
+        error: "Área inválida.",
+      });
+    }
 
-      if (
-        !puesto_id ||
-        isNaN(Number(puesto_id))
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: "Puesto inválido.",
-        });
-      }
+    if (!puesto_id || isNaN(Number(puesto_id))) {
+      return res.status(400).json({
+        success: false,
+        error: "Puesto inválido.",
+      });
+    }
 
-      if (!String(nombre || "").trim()) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "El nombre del trabajador es obligatorio.",
-        });
-      }
+    if (!String(nombre || "").trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "El nombre del trabajador es obligatorio.",
+      });
+    }
 
-      if (
-        !["activo", "baja"].includes(estatus)
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Estatus de trabajador inválido.",
-        });
-      }
+    if (!["activo", "baja"].includes(estatus)) {
+      return res.status(400).json({
+        success: false,
+        error: "Estatus de trabajador inválido.",
+      });
+    }
 
-      // =================================================
-      // NORMALIZAR
-      // =================================================
+    // =================================================
+    // NORMALIZAR
+    // =================================================
 
-      const numeroEmpleadoNormalizado =
-        String(numero_empleado || "").trim();
+    const numeroEmpleadoNormalizado = String(numero_empleado || "").trim();
 
-      const nssNormalizado =
-        normalizarNss(nss);
+    const nssNormalizado = normalizarNss(nss);
 
-      const curpNormalizada =
-        normalizarCurp(curp);
+    const curpNormalizada = normalizarCurp(curp);
 
-      const tipoSangreNormalizado =
-        normalizarTipoSangre(tipo_sangre);
+    const tipoSangreNormalizado = normalizarTipoSangre(tipo_sangre);
 
-      const telefonoNormalizado =
-        normalizarTextoOpcional(telefono);
+    const telefonoNormalizado = normalizarTextoOpcional(telefono);
 
-      // =================================================
-      // VALIDAR NSS
-      // =================================================
+    // =================================================
+    // VALIDAR NSS
+    // =================================================
 
-      if (
-        nssNormalizado &&
-        !/^\d{11}$/.test(nssNormalizado)
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "El Número de Seguro Social (NSS) debe contener exactamente 11 dígitos.",
-        });
-      }
+    if (nssNormalizado && !/^\d{11}$/.test(nssNormalizado)) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "El Número de Seguro Social (NSS) debe contener exactamente 11 dígitos.",
+      });
+    }
 
-      // =================================================
-      // VALIDAR CURP
-      // =================================================
+    // =================================================
+    // VALIDAR CURP
+    // =================================================
 
-      if (
-        curpNormalizada &&
-        curpNormalizada.length !== 18
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "La CURP debe contener exactamente 18 caracteres.",
-        });
-      }
+    if (curpNormalizada && curpNormalizada.length !== 18) {
+      return res.status(400).json({
+        success: false,
+        error: "La CURP debe contener exactamente 18 caracteres.",
+      });
+    }
 
-      // =================================================
-      // VALIDAR TIPO SANGRE
-      // =================================================
+    // =================================================
+    // VALIDAR TIPO SANGRE
+    // =================================================
 
-      const tiposSangrePermitidos = [
-        "A+",
-        "A-",
-        "B+",
-        "B-",
-        "AB+",
-        "AB-",
-        "O+",
-        "O-",
-      ];
+    const tiposSangrePermitidos = [
+      "A+",
+      "A-",
+      "B+",
+      "B-",
+      "AB+",
+      "AB-",
+      "O+",
+      "O-",
+    ];
 
-      if (
-        tipoSangreNormalizado &&
-        !tiposSangrePermitidos.includes(
-          tipoSangreNormalizado,
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: "Tipo de sangre inválido.",
-        });
-      }
+    if (
+      tipoSangreNormalizado &&
+      !tiposSangrePermitidos.includes(tipoSangreNormalizado)
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Tipo de sangre inválido.",
+      });
+    }
 
-      // =================================================
-      // VALIDAR FECHAS
-      // =================================================
+    // =================================================
+    // VALIDAR FECHAS
+    // =================================================
 
-      if (
-        !fechaValidaFormato(fecha_nacimiento)
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "La fecha de nacimiento debe tener formato AAAA-MM-DD.",
-        });
-      }
+    if (!fechaValidaFormato(fecha_nacimiento)) {
+      return res.status(400).json({
+        success: false,
+        error: "La fecha de nacimiento debe tener formato AAAA-MM-DD.",
+      });
+    }
 
-      if (!fechaValidaFormato(fecha_ingreso)) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "La fecha de ingreso debe tener formato AAAA-MM-DD.",
-        });
-      }
+    if (!fechaValidaFormato(fecha_ingreso)) {
+      return res.status(400).json({
+        success: false,
+        error: "La fecha de ingreso debe tener formato AAAA-MM-DD.",
+      });
+    }
 
-      // =================================================
-      // BUSCAR TRABAJADOR ACTUAL
-      // =================================================
+    // =================================================
+    // BUSCAR TRABAJADOR ACTUAL
+    // =================================================
 
-      const trabajadorActual =
-        await db.query(
-          `
+    const trabajadorActual = await db.query(
+      `
           SELECT *
           FROM trabajadores
           WHERE id = $1
           `,
-          [trabajadorId],
-        );
+      [trabajadorId],
+    );
 
-      if (
-        trabajadorActual.rows.length === 0
-      ) {
-        return res.status(404).json({
-          success: false,
-          error: "Trabajador no encontrado.",
-        });
-      }
+    if (trabajadorActual.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Trabajador no encontrado.",
+      });
+    }
 
-      const trabajador =
-        trabajadorActual.rows[0];
+    const trabajador = trabajadorActual.rows[0];
 
-      // =================================================
-      // VALIDAR ÁREA
-      // =================================================
+    // =================================================
+    // VALIDAR ÁREA
+    // =================================================
 
-      const areaResult = await db.query(
-        `
+    const areaResult = await db.query(
+      `
         SELECT id
         FROM areas_trabajo
         WHERE id = $1
           AND cliente_id = $2
         `,
-        [
-          area_id,
-          trabajador.cliente_id,
-        ],
-      );
+      [area_id, trabajador.cliente_id],
+    );
 
-      if (areaResult.rows.length === 0) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "El área seleccionada no pertenece al cliente.",
-        });
-      }
+    if (areaResult.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "El área seleccionada no pertenece al cliente.",
+      });
+    }
 
-      // =================================================
-      // VALIDAR PUESTO
-      // =================================================
+    // =================================================
+    // VALIDAR PUESTO
+    // =================================================
 
-      const puestoResult = await db.query(
-        `
+    const puestoResult = await db.query(
+      `
         SELECT id
         FROM puestos_trabajo
         WHERE id = $1
           AND area_id = $2
         `,
-        [puesto_id, area_id],
-      );
+      [puesto_id, area_id],
+    );
 
-      if (puestoResult.rows.length === 0) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "El puesto seleccionado no pertenece al área.",
-        });
-      }
+    if (puestoResult.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "El puesto seleccionado no pertenece al área.",
+      });
+    }
 
-      // =================================================
-      // VALIDAR NÚMERO DE EMPLEADO DUPLICADO
-      // =================================================
+    // =================================================
+    // VALIDAR NÚMERO DE EMPLEADO DUPLICADO
+    // =================================================
 
-      if (numeroEmpleadoNormalizado) {
-        const duplicado = await db.query(
-          `
+    if (numeroEmpleadoNormalizado) {
+      const duplicado = await db.query(
+        `
           SELECT id
           FROM trabajadores
           WHERE cliente_id = $1
@@ -5877,84 +5801,71 @@ app.put(
             AND id <> $3
           LIMIT 1
           `,
-          [
-            trabajador.cliente_id,
-            numeroEmpleadoNormalizado,
-            trabajadorId,
-          ],
-        );
+        [trabajador.cliente_id, numeroEmpleadoNormalizado, trabajadorId],
+      );
 
-        if (duplicado.rows.length > 0) {
-          return res.status(400).json({
-            success: false,
-            error:
-              "Ya existe otro trabajador con ese número de empleado.",
-          });
-        }
+      if (duplicado.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Ya existe otro trabajador con ese número de empleado.",
+        });
       }
+    }
 
-      // =================================================
-      // VALIDAR CURP DUPLICADA
-      // =================================================
+    // =================================================
+    // VALIDAR CURP DUPLICADA
+    // =================================================
 
-      if (curpNormalizada) {
-        const curpExistente = await db.query(
-          `
+    if (curpNormalizada) {
+      const curpExistente = await db.query(
+        `
           SELECT id
           FROM trabajadores
           WHERE UPPER(curp) = $1
             AND id <> $2
           LIMIT 1
           `,
-          [
-            curpNormalizada,
-            trabajadorId,
-          ],
-        );
+        [curpNormalizada, trabajadorId],
+      );
 
-        if (curpExistente.rows.length > 0) {
-          return res.status(400).json({
-            success: false,
-            error:
-              "Ya existe otro trabajador registrado con esa CURP.",
-          });
-        }
+      if (curpExistente.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Ya existe otro trabajador registrado con esa CURP.",
+        });
       }
+    }
 
-      // =================================================
-      // VALIDAR NSS DUPLICADO
-      // =================================================
+    // =================================================
+    // VALIDAR NSS DUPLICADO
+    // =================================================
 
-      if (nssNormalizado) {
-        const nssExistente = await db.query(
-          `
+    if (nssNormalizado) {
+      const nssExistente = await db.query(
+        `
           SELECT id
           FROM trabajadores
           WHERE nss = $1
             AND id <> $2
           LIMIT 1
           `,
-          [
-            nssNormalizado,
-            trabajadorId,
-          ],
-        );
+        [nssNormalizado, trabajadorId],
+      );
 
-        if (nssExistente.rows.length > 0) {
-          return res.status(400).json({
-            success: false,
-            error:
-              "Ya existe otro trabajador registrado con ese NSS.",
-          });
-        }
+      if (nssExistente.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Ya existe otro trabajador registrado con ese NSS.",
+        });
       }
+    }
 
-      // =================================================
-      // ACTUALIZAR
-      // =================================================
+    // =================================================
+    // ACTUALIZAR
+    // =================================================
 
-      const resultado = await db.query(
-        `
+    const resultado = await db.query(
+      `
         UPDATE trabajadores
         SET
           area_id = $1,
@@ -5976,62 +5887,52 @@ app.put(
 
         RETURNING *
         `,
-        [
-          Number(area_id),
-          Number(puesto_id),
+      [
+        Number(area_id),
+        Number(puesto_id),
 
-          numeroEmpleadoNormalizado || null,
+        numeroEmpleadoNormalizado || null,
 
-          String(nombre).trim(),
+        String(nombre).trim(),
 
-          telefonoNormalizado,
+        telefonoNormalizado,
 
-          fecha_ingreso || null,
+        fecha_ingreso || null,
 
-          nssNormalizado,
+        nssNormalizado,
 
-          tipoSangreNormalizado,
+        tipoSangreNormalizado,
 
-          fecha_nacimiento || null,
+        fecha_nacimiento || null,
 
-          curpNormalizada,
+        curpNormalizada,
 
-          estatus,
+        estatus,
 
-          trabajadorId,
-        ],
-      );
+        trabajadorId,
+      ],
+    );
 
-      console.log("====================================");
-      console.log("TRABAJADOR ACTUALIZADO");
-      console.log(resultado.rows[0]);
-      console.log("====================================");
+    console.log("====================================");
+    console.log("TRABAJADOR ACTUALIZADO");
+    console.log(resultado.rows[0]);
+    console.log("====================================");
 
-      return res.json({
-        success: true,
-        message:
-          "Trabajador actualizado correctamente.",
-        trabajador: resultado.rows[0],
-      });
-    } catch (error) {
-      console.log(
-        "ERROR ACTUALIZANDO TRABAJADOR:",
-        error,
-      );
+    return res.json({
+      success: true,
+      message: "Trabajador actualizado correctamente.",
+      trabajador: resultado.rows[0],
+    });
+  } catch (error) {
+    console.log("ERROR ACTUALIZANDO TRABAJADOR:", error);
 
-      return res.status(500).json({
-        success: false,
-        error:
-          "No fue posible actualizar el trabajador.",
-        detalle: error.message,
-      });
-    }
-  },
-);
-
-
-
-
+    return res.status(500).json({
+      success: false,
+      error: "No fue posible actualizar el trabajador.",
+      detalle: error.message,
+    });
+  }
+});
 
 // =====================================================
 // OBTENER TRABAJADORES DE UN PUESTO
@@ -6093,13 +5994,11 @@ app.get("/trabajadores/puesto/:puestoId", async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      error:
-        "No fue posible consultar los trabajadores del puesto.",
+      error: "No fue posible consultar los trabajadores del puesto.",
       detalle: error.message,
     });
   }
 });
-
 
 // =====================================================
 // OBTENER UN TRABAJADOR
@@ -6157,7 +6056,6 @@ app.get("/trabajador/:trabajadorId", async (req, res) => {
     });
   }
 });
-
 
 // =====================================================
 // ACTUALIZAR TRABAJADOR
@@ -6276,9 +6174,7 @@ app.put("/trabajadores/:trabajadorId", async (req, res) => {
       });
     }
 
-    const numeroEmpleadoNormalizado = String(
-      numero_empleado || "",
-    ).trim();
+    const numeroEmpleadoNormalizado = String(numero_empleado || "").trim();
 
     // =================================================
     // VALIDAR DUPLICADO
@@ -6294,18 +6190,13 @@ app.put("/trabajadores/:trabajadorId", async (req, res) => {
           AND id <> $3
         LIMIT 1
         `,
-        [
-          trabajador.cliente_id,
-          numeroEmpleadoNormalizado,
-          trabajadorId,
-        ],
+        [trabajador.cliente_id, numeroEmpleadoNormalizado, trabajadorId],
       );
 
       if (duplicado.rows.length > 0) {
         return res.status(400).json({
           success: false,
-          error:
-            "Ya existe otro trabajador con ese número de empleado.",
+          error: "Ya existe otro trabajador con ese número de empleado.",
         });
       }
     }
@@ -6356,7 +6247,6 @@ app.put("/trabajadores/:trabajadorId", async (req, res) => {
     });
   }
 });
-
 
 // =====================================================
 // ENTREGAS DE EPP A TRABAJADORES
@@ -6438,7 +6328,8 @@ app.post("/entregas-epp", async (req, res) => {
       if (!Number.isInteger(cantidad) || cantidad <= 0) {
         return res.status(400).json({
           success: false,
-          error: "Todas las cantidades deben ser números enteros mayores a cero.",
+          error:
+            "Todas las cantidades deben ser números enteros mayores a cero.",
         });
       }
 
@@ -6749,7 +6640,6 @@ app.post("/entregas-epp", async (req, res) => {
   }
 });
 
-
 // =====================================================
 // BITÁCORA DE ENTREGAS POR TRABAJADOR
 // =====================================================
@@ -6876,7 +6766,6 @@ app.get("/entregas-epp/trabajador/:trabajadorId", async (req, res) => {
   }
 });
 
-
 // =====================================================
 // CONSULTAR UNA ENTREGA DE EPP
 // =====================================================
@@ -6964,7 +6853,6 @@ app.get("/entregas-epp/:entregaId", async (req, res) => {
   }
 });
 
-
 // =====================================================
 // INVENTARIO DISPONIBLE PARA UN TRABAJADOR
 //
@@ -7036,11 +6924,7 @@ app.get(
           AND cantidad_total > 0
         ORDER BY nombre_producto ASC, clave_producto ASC
         `,
-        [
-          trabajador.cliente_id,
-          trabajador.area_id,
-          trabajador.puesto_id,
-        ],
+        [trabajador.cliente_id, trabajador.area_id, trabajador.puesto_id],
       );
 
       return res.json({
@@ -7057,10 +6941,7 @@ app.get(
         inventario: inventarioResult.rows,
       });
     } catch (error) {
-      console.log(
-        "ERROR CONSULTANDO INVENTARIO PARA TRABAJADOR:",
-        error,
-      );
+      console.log("ERROR CONSULTANDO INVENTARIO PARA TRABAJADOR:", error);
 
       return res.status(500).json({
         success: false,
@@ -7071,7 +6952,6 @@ app.get(
     }
   },
 );
-
 
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
