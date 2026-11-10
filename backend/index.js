@@ -737,7 +737,7 @@ const autenticarRH = async (req, res, next) => {
     if (!secreto || secreto.length < 32) {
       return res.status(503).json({ success: false, error: "SESSION_SECRET no configurado." });
     }
-    const coincidencia = /^Bearer\\s+(.+)$/i.exec(req.headers.authorization || "");
+    const coincidencia = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || "");
     const partes = coincidencia?.[1]?.split(".");
     if (!partes || partes.length !== 2) {
       return res.status(401).json({ success: false, error: "Sesión requerida." });
@@ -751,7 +751,7 @@ const autenticarRH = async (req, res, next) => {
     }
     const datos = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     if (!Number.isSafeInteger(datos.exp) || datos.exp <= Date.now() / 1000 ||
-        !/^\\d+$/.test(String(datos.sub))) {
+        !/^\d+$/.test(String(datos.sub))) {
       return res.status(401).json({ success: false, error: "Sesión expirada o inválida." });
     }
     // Consultar permisos ACTUALES en la base de datos, no confiar en el token para el rol.
@@ -7278,7 +7278,7 @@ app.get(
   autenticarRH, autorizarTrabajadorRH,
   async (req, res) => {
     try {
-      if (!/^\\d+$/.test(req.params.estudioId)) {
+      if (!/^\d+$/.test(req.params.estudioId)) {
         return res.status(400).json({ success: false, error: "Estudio inválido." });
       }
       const resultado = await db.query(`
