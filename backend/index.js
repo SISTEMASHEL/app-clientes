@@ -766,8 +766,13 @@ function soloRhRoles(req,res,next) {
 }
 function accesoEmpresaRoles(req,res,next) {
   const u=req.usuarioRoles;
+  // Este middleware se monta en /clientes/:clienteId/contratistas.
+  // Express solo coloca clienteId en req.params; empresaId pertenece a req.path.
+  const empresaMatch = /^\/(\d+)(?:\/|$)/.exec(req.path);
+  const empresaId = empresaMatch ? Number(empresaMatch[1]) : NaN;
   if (Number(u.cliente_id)!==Number(req.params.clienteId)) return res.status(403).json({success:false,error:"Cliente no autorizado"});
-  if (u.rol==="rh" || (u.rol==="contratista" && Number(u.contratista_empresa_id)===Number(req.params.empresaId))) return next();
+  if (!Number.isSafeInteger(empresaId) || empresaId <= 0) return res.status(400).json({success:false,error:"Empresa inválida"});
+  if (u.rol==="rh" || (u.rol==="contratista" && Number(u.contratista_empresa_id)===empresaId)) return next();
   return res.status(403).json({success:false,error:"Empresa no autorizada"});
 }
 function soloContratistaRoles(req,res,next) {
