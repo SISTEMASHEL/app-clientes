@@ -7781,20 +7781,53 @@ app.post("/trabajadores/:id/estudios-medicos", (req, res, next) => {
 
 app.get("/trabajadores/:id/estudios-medicos/:estudioId/pdf", async (req, res) => {
   try {
-    const r = await db.query("SELECT archivo_interno, nombre_archivo FROM estudios_medicos_trabajadores WHERE id=$1 AND trabajador_id=$2", [req.params.estudioId, req.params.id]);
+    const r = await db.query(
+      "SELECT archivo_interno FROM estudios_medicos_trabajadores WHERE id=$1 AND trabajador_id=$2",
+      [req.params.estudioId, req.params.id]
+    );
     if (!r.rowCount) return res.status(404).json({ success: false, error: "Estudio no encontrado" });
+
     const archivo = r.rows[0].archivo_interno;
-    if (!/^estudio-[0-9a-f-]+\.pdf$/.test(archivo)) return res.status(500).json({ success: false, error: "Archivo inválido" });
+    if (typeof archivo !== "string" || !/^estudio-[0-9a-f-]+\.pdf$/.test(archivo)) {
+      return res.status(500).json({ success: false, error: "Referencia de PDF inválida" });
+    }
     const ruta = path.join(estudiosMedicosDir, archivo);
-    await fs.promises.access(ruta, fs.constants.R_OK);
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Cache-Control", "private, no-store");
-    res.setHeader("Content-Disposition", "inline; filename=estudio-medico.pdf");
-    res.sendFile(ruta);
+    let stats;
+    try {
+      stats = await fs.promises.stat(ruta);
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        console.error("PDF médico ausente en Disk:", ruta);
+        return res.status(404).json({ success: false, error: "PDF no disponible en el Disk /uploads" });
+      }
+      throw error;
+    }
+    if (!stats.isFile()) return res.status(404).json({ success: false, error: "PDF no disponible" });
+
+    // Abrir el archivo ANTES de responder: así cualquier error conserva su código HTTP.
+    const handle = await fs.promises.open(ruta, "r");
+    let stream;
+    try {
+      stream = handle.createReadStream({ autoClose: true });
+      stream.on("error", error => {
+        console.error("Error leyendo PDF médico del Disk:", error);
+        if (!res.headersSent) res.status(500).json({ success: false, error: "No se pudo leer el PDF" });
+        else res.destroy(error);
+      });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "inline; filename=estudio-medico.pdf");
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("Content-Length", stats.size);
+      stream.pipe(res);
+    } catch (error) {
+      if (stream) stream.destroy();
+      else await handle.close().catch(() => {});
+      throw error;
+    }
   } catch (e) {
-    if (e.code === "ENOENT") return res.status(404).json({ success: false, error: "PDF no disponible" });
     console.error("Abrir estudio médico:", e);
-    res.status(500).json({ success: false, error: "No fue posible abrir el PDF" });
+    if (!res.headersSent) return res.status(500).json({ success: false, error: "No fue posible abrir el PDF" });
+    res.destroy(e);
   }
 });
 
