@@ -3069,9 +3069,11 @@ const TIPOS_DOCUMENTOS_CONTRATISTAS = [
   "induccion",
 ];
 
-// Directorio oculto dentro del mismo disco persistente de Render.
-// No se publica por express.static (dotfiles: "deny").
-const documentosContratistasDir = path.join(uploadsDir, ".contratistas_privados");
+// Los nuevos PDF de contratistas se guardan DIRECTAMENTE en /uploads.
+// Se conserva lectura de archivos anteriores en la subcarpeta legada.
+// IMPORTANTE: /uploads es publico por express.static; proteger acceso antes de produccion.
+const documentosContratistasDir = uploadsDir;
+const documentosContratistasDirAnterior = path.join(uploadsDir, ".contratistas_privados");
 fs.mkdirSync(documentosContratistasDir, { recursive: true });
 
 const almacenamientoDocumentosContratistas = multer.diskStorage({
@@ -3109,11 +3111,13 @@ function eliminarArchivoContratista(ruta) {
   if (!ruta || typeof ruta !== "string") return;
   const nombre = path.basename(ruta);
   if (nombre !== ruta || !/^[a-zA-Z0-9-]+\.pdf$/.test(nombre)) return;
-  fs.unlink(path.join(documentosContratistasDir, nombre), (err) => {
-    if (err && err.code !== "ENOENT") {
-      console.error("No se pudo borrar PDF contratista:", err);
-    }
-  });
+  for (const directorio of [documentosContratistasDir, documentosContratistasDirAnterior]) {
+    fs.unlink(path.join(directorio, nombre), (err) => {
+      if (err && err.code !== "ENOENT") {
+        console.error("No se pudo borrar PDF contratista:", err);
+      }
+    });
+  }
 }
 
 // Lista los cinco tipos, incluidos los pendientes de carga.
@@ -3229,7 +3233,9 @@ app.get("/contratistas/trabajadores/:id/documentos/:tipo/pdf", async (req, res) 
     if (path.basename(nombre) !== nombre || !/^[a-zA-Z0-9-]+\.pdf$/.test(nombre)) {
       return res.status(500).json({ success: false, error: "Ruta de documento inválida" });
     }
-    const ruta = path.join(documentosContratistasDir, nombre);
+    const rutaNueva = path.join(documentosContratistasDir, nombre);
+    const rutaAnterior = path.join(documentosContratistasDirAnterior, nombre);
+    const ruta = fs.existsSync(rutaNueva) ? rutaNueva : rutaAnterior;
     return res.sendFile(ruta, {
       headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline" },
     }, (err) => {
