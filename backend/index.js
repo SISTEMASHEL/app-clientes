@@ -8,7 +8,6 @@ const { Pool } = require("pg");
 const path = require("path");
 const multer = require("multer");
 const fs = require("fs");
-const crypto = require("crypto");
 
 const app = express();
 
@@ -141,16 +140,6 @@ const reportesNomDir = path.join(uploadsDir, "reportes_nom");
 if (!fs.existsSync(reportesNomDir)) {
   fs.mkdirSync(reportesNomDir, { recursive: true });
 }
-
-// Archivos médicos privados en el Persistent Disk (NO públicos).
-const estudiosMedicosDir = path.join(uploadsDir, "estudios_medicos");
-fs.mkdirSync(estudiosMedicosDir, { recursive: true });
-
-// Esta regla debe ir ANTES de express.static("/uploads").
-app.use("/uploads/estudios_medicos", (req, res) => {
-  res.setHeader("Cache-Control", "no-store");
-  return res.status(403).json({ success: false, error: "Acceso directo prohibido." });
-});
 
 // Servir públicamente TODO lo almacenado en el Disk de Render.
 // Ruta física: /uploads/archivo.pdf
@@ -714,25 +703,6 @@ const upload = multer({
 });
 
 // ------------------- RUTAS (TODO IGUAL) -------------------
-
-// Valida la existencia del trabajador. Sin una sesion autenticada,
-// este control NO verifica quien solicita el expediente medico.
-const verificarTrabajadorEstudios = async (req, res, next) => {
-  try {
-    const trabajadorId = Number(req.params.trabajadorId);
-    if (!Number.isSafeInteger(trabajadorId) || trabajadorId <= 0) {
-      return res.status(400).json({ success: false, error: "Trabajador invalido." });
-    }
-    const resultado = await db.query("SELECT id FROM trabajadores WHERE id = $1", [trabajadorId]);
-    if (!resultado.rows.length) {
-      return res.status(404).json({ success: false, error: "Trabajador no encontrado." });
-    }
-    next();
-  } catch (error) {
-    console.error("ERROR VERIFICANDO TRABAJADOR:", error);
-    return res.status(500).json({ success: false, error: "Error verificando trabajador." });
-  }
-};
 
 // =====================================================
 // LOGIN
@@ -2843,6 +2813,456 @@ app.get("/documentos-epp-cliente/:clienteId", async (req, res) => {
       error:
         "No fue posible obtener las fichas técnicas y certificados del EPP.",
     });
+  }
+});
+
+// ======================================================
+// EMPRESAS CONTRATISTAS Y SUS TRABAJADORES
+// Tablas existentes: empresas_contratistas, trabajadores_contratistas
+// No modifica las rutas de trabajadores de Recursos Humanos.
+// IMPORTANTE: estas rutas requieren autorización por cliente
+// antes de exponer datos personales en producción.
+// ======================================================
+const idContratistaValido = (valor) => {
+  const n = Number(valor);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+};
+const textoContratista = (valor, max = 250) => {
+  if (valor === undefined || valor === null || String(valor).trim() === "") return null;
+  return String(valor).trim().slice(0, max);
+};
+const fechaContratista = (valor) => {
+  if (valor === undefined || valor === null || valor === "") return null;
+  const str = String(valor);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return undefined;
+  const d = new Date(`${str}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== str ? undefined : str;
+};
+const SEXOS_CONTRATISTAS = ["masculino", "femenino", "otro", "no_especificado"];
+const ESTATUS_EMPRESAS = ["activa", "inactiva"];
+const ESTATUS_PERSONAL = ["activo", "baja"];
+
+async function empresaContratistaDelCliente(clienteId, empresaId) {
+  const r = await db.query(
+    `SELECT * FROM empresas_contratistas WHERE id = $1 AND cliente_id = $2`,
+    [empresaId, clienteId]
+  );
+  return r.rows[0] || null;
+}
+async function validarAreaPuestoContratista(clienteId, areaId, puestoId) {
+  if (areaId === null && puestoId === null) return true;
+  if (areaId === null || puestoId === null) return false;
+  const r = await db.query(
+    `SELECT 1 FROM areas_trabajo a
+     JOIN puestos_trabajo p ON p.area_id = a.id
+     WHERE a.id = $1 AND p.id = $2 AND a.cliente_id = $3`,
+    [areaId, puestoId, clienteId]
+  );
+  return r.rowCount > 0;
+}
+
+// Empresas de un cliente
+app.get("/clientes/:clienteId/contratistas", async (req, res) => {
+  const clienteId = idContratistaValido(req.params.clienteId);
+  if (!clienteId) return res.status(400).json({ success: false, error: "Cliente inválido" });
+  try {
+    const r = await db.query(
+      `SELECT ec.*, (SELECT COUNT(*)::integer FROM trabajadores_contratistas tc
+        WHERE tc.empresa_contratista_id = ec.id) AS total_trabajadores
+       FROM empresas_contratistas ec WHERE ec.cliente_id = $1 ORDER BY ec.nombre`,
+      [clienteId]
+    );
+    return res.json({ success: true, empresas: r.rows });
+  } catch (error) {
+    console.error("Error consultando empresas contratistas:", error);
+    return res.status(500).json({ success: false, error: "No fue posible consultar las empresas" });
+  }
+});
+
+app.post("/clientes/:clienteId/contratistas", async (req, res) => {
+  const clienteId = idContratistaValido(req.params.clienteId);
+  const nombre = textoContratista(req.body?.nombre, 200);
+  const estatus = req.body?.estatus || "activa";
+  if (!clienteId || !nombre || !ESTATUS_EMPRESAS.includes(estatus))
+    return res.status(400).json({ success: false, error: "Cliente, nombre o estatus inválido" });
+  try {
+    const r = await db.query(
+      `INSERT INTO empresas_contratistas
+       (cliente_id, nombre, rfc, razon_social, telefono, correo, direccion, responsable, actividad, estatus)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [clienteId, nombre, textoContratista(req.body.rfc,13),
+       textoContratista(req.body.razon_social,250), textoContratista(req.body.telefono,30),
+       textoContratista(req.body.correo,150), textoContratista(req.body.direccion,10000),
+       textoContratista(req.body.responsable,200), textoContratista(req.body.actividad,10000), estatus]
+    );
+    return res.status(201).json({ success: true, empresa: r.rows[0] });
+  } catch (error) {
+    console.error("Error registrando empresa contratista:", error);
+    return res.status(500).json({ success: false, error: "No fue posible registrar la empresa" });
+  }
+});
+
+app.get("/clientes/:clienteId/contratistas/:empresaId", async (req, res) => {
+  const clienteId = idContratistaValido(req.params.clienteId);
+  const empresaId = idContratistaValido(req.params.empresaId);
+  if (!clienteId || !empresaId) return res.status(400).json({ success: false, error: "IDs inválidos" });
+  try {
+    const empresa = await empresaContratistaDelCliente(clienteId, empresaId);
+    if (!empresa) return res.status(404).json({ success: false, error: "Empresa no encontrada" });
+    return res.json({ success: true, empresa });
+  } catch (error) {
+    console.error("Error consultando empresa:", error);
+    return res.status(500).json({ success: false, error: "No fue posible consultar la empresa" });
+  }
+});
+
+app.put("/clientes/:clienteId/contratistas/:empresaId", async (req, res) => {
+  const clienteId = idContratistaValido(req.params.clienteId);
+  const empresaId = idContratistaValido(req.params.empresaId);
+  const nombre = textoContratista(req.body?.nombre,200);
+  const estatus = req.body?.estatus || "activa";
+  if (!clienteId || !empresaId || !nombre || !ESTATUS_EMPRESAS.includes(estatus))
+    return res.status(400).json({ success: false, error: "Datos de empresa inválidos" });
+  try {
+    const r = await db.query(
+      `UPDATE empresas_contratistas SET nombre=$1, rfc=$2, razon_social=$3,
+       telefono=$4, correo=$5, direccion=$6, responsable=$7, actividad=$8, estatus=$9
+       WHERE id=$10 AND cliente_id=$11 RETURNING *`,
+      [nombre, textoContratista(req.body.rfc,13), textoContratista(req.body.razon_social,250),
+       textoContratista(req.body.telefono,30), textoContratista(req.body.correo,150),
+       textoContratista(req.body.direccion,10000), textoContratista(req.body.responsable,200),
+       textoContratista(req.body.actividad,10000), estatus, empresaId, clienteId]
+    );
+    if (!r.rowCount) return res.status(404).json({ success: false, error: "Empresa no encontrada" });
+    return res.json({ success: true, empresa: r.rows[0] });
+  } catch (error) {
+    console.error("Error actualizando empresa:", error);
+    return res.status(500).json({ success: false, error: "No fue posible actualizar la empresa" });
+  }
+});
+
+// Trabajadores de una empresa específica de un cliente
+app.get("/clientes/:clienteId/contratistas/:empresaId/trabajadores", async (req, res) => {
+  const clienteId = idContratistaValido(req.params.clienteId);
+  const empresaId = idContratistaValido(req.params.empresaId);
+  if (!clienteId || !empresaId) return res.status(400).json({ success: false, error: "IDs inválidos" });
+  try {
+    if (!await empresaContratistaDelCliente(clienteId, empresaId))
+      return res.status(404).json({ success: false, error: "Empresa no encontrada para este cliente" });
+    const r = await db.query(
+      `SELECT * FROM trabajadores_contratistas WHERE empresa_contratista_id=$1 ORDER BY nombre`,
+      [empresaId]
+    );
+    return res.json({ success: true, trabajadores: r.rows });
+  } catch (error) {
+    console.error("Error consultando trabajadores contratistas:", error);
+    return res.status(500).json({ success: false, error: "No fue posible consultar los trabajadores" });
+  }
+});
+
+function datosTrabajadorContratista(body) {
+  const nombre = textoContratista(body?.nombre,200);
+  const areaId = body?.area_id == null || body.area_id === "" ? null : idContratistaValido(body.area_id);
+  const puestoId = body?.puesto_id == null || body.puesto_id === "" ? null : idContratistaValido(body.puesto_id);
+  const sexo = body?.sexo || null;
+  const estatus = body?.estatus || "activo";
+  const fechaNacimiento = fechaContratista(body?.fecha_nacimiento);
+  const fechaIngreso = fechaContratista(body?.fecha_ingreso);
+  const curp = textoContratista(body?.curp,18)?.toUpperCase() || null;
+  const nss = textoContratista(body?.nss,20);
+  const tipoSangre = textoContratista(body?.tipo_sangre,10)?.toUpperCase() || null;
+  if (!nombre || (body?.area_id != null && body.area_id !== "" && !areaId) ||
+      (body?.puesto_id != null && body.puesto_id !== "" && !puestoId) ||
+      !ESTATUS_PERSONAL.includes(estatus) || (sexo && !SEXOS_CONTRATISTAS.includes(sexo)) ||
+      fechaNacimiento === undefined || fechaIngreso === undefined ||
+      (curp && !/^[A-Z0-9]{18}$/.test(curp)) || (nss && !/^\d{11}$/.test(nss)))
+    return null;
+  return { nombre, areaId, puestoId, sexo, estatus, fechaNacimiento, fechaIngreso, curp, nss, tipoSangre };
+}
+
+app.post("/clientes/:clienteId/contratistas/:empresaId/trabajadores", async (req, res) => {
+  const clienteId = idContratistaValido(req.params.clienteId);
+  const empresaId = idContratistaValido(req.params.empresaId);
+  const d = datosTrabajadorContratista(req.body);
+  if (!clienteId || !empresaId || !d) return res.status(400).json({ success: false, error: "Datos de trabajador inválidos" });
+  try {
+    if (!await empresaContratistaDelCliente(clienteId, empresaId))
+      return res.status(404).json({ success: false, error: "Empresa no encontrada para este cliente" });
+    if (!await validarAreaPuestoContratista(clienteId, d.areaId, d.puestoId))
+      return res.status(400).json({ success: false, error: "Área y puesto deben corresponder al cliente" });
+    const r = await db.query(
+      `INSERT INTO trabajadores_contratistas
+       (empresa_contratista_id,nombre,curp,nss,fecha_nacimiento,sexo,tipo_sangre,
+        area_id,puesto_id,estatus,fecha_ingreso)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [empresaId,d.nombre,d.curp,d.nss,d.fechaNacimiento,d.sexo,d.tipoSangre,
+       d.areaId,d.puestoId,d.estatus,d.fechaIngreso]
+    );
+    return res.status(201).json({ success: true, trabajador: r.rows[0] });
+  } catch (error) {
+    console.error("Error registrando trabajador contratista:", error);
+    return res.status(500).json({ success: false, error: "No fue posible registrar el trabajador" });
+  }
+});
+
+app.put("/clientes/:clienteId/contratistas/:empresaId/trabajadores/:trabajadorId", async (req, res) => {
+  const clienteId = idContratistaValido(req.params.clienteId);
+  const empresaId = idContratistaValido(req.params.empresaId);
+  const trabajadorId = idContratistaValido(req.params.trabajadorId);
+  const d = datosTrabajadorContratista(req.body);
+  if (!clienteId || !empresaId || !trabajadorId || !d)
+    return res.status(400).json({ success: false, error: "Datos de trabajador inválidos" });
+  try {
+    if (!await empresaContratistaDelCliente(clienteId, empresaId))
+      return res.status(404).json({ success: false, error: "Empresa no encontrada para este cliente" });
+    if (!await validarAreaPuestoContratista(clienteId, d.areaId, d.puestoId))
+      return res.status(400).json({ success: false, error: "Área y puesto deben corresponder al cliente" });
+    const r = await db.query(
+      `UPDATE trabajadores_contratistas SET nombre=$1,curp=$2,nss=$3,
+       fecha_nacimiento=$4,sexo=$5,tipo_sangre=$6,area_id=$7,puesto_id=$8,
+       estatus=$9,fecha_ingreso=$10
+       WHERE id=$11 AND empresa_contratista_id=$12 RETURNING *`,
+      [d.nombre,d.curp,d.nss,d.fechaNacimiento,d.sexo,d.tipoSangre,d.areaId,
+       d.puestoId,d.estatus,d.fechaIngreso,trabajadorId,empresaId]
+    );
+    if (!r.rowCount) return res.status(404).json({ success: false, error: "Trabajador no encontrado" });
+    return res.json({ success: true, trabajador: r.rows[0] });
+  } catch (error) {
+    console.error("Error actualizando trabajador contratista:", error);
+    return res.status(500).json({ success: false, error: "No fue posible actualizar el trabajador" });
+  }
+});
+
+app.patch("/clientes/:clienteId/contratistas/:empresaId/trabajadores/:trabajadorId/baja", async (req, res) => {
+  const clienteId = idContratistaValido(req.params.clienteId);
+  const empresaId = idContratistaValido(req.params.empresaId);
+  const trabajadorId = idContratistaValido(req.params.trabajadorId);
+  if (!clienteId || !empresaId || !trabajadorId)
+    return res.status(400).json({ success: false, error: "IDs inválidos" });
+  try {
+    if (!await empresaContratistaDelCliente(clienteId, empresaId))
+      return res.status(404).json({ success: false, error: "Empresa no encontrada para este cliente" });
+    const r = await db.query(
+      `UPDATE trabajadores_contratistas SET estatus='baja'
+       WHERE id=$1 AND empresa_contratista_id=$2 RETURNING *`,
+      [trabajadorId, empresaId]
+    );
+    if (!r.rowCount) return res.status(404).json({ success: false, error: "Trabajador no encontrado" });
+    return res.json({ success: true, trabajador: r.rows[0] });
+  } catch (error) {
+    console.error("Error dando de baja trabajador contratista:", error);
+    return res.status(500).json({ success: false, error: "No fue posible dar de baja al trabajador" });
+  }
+});
+
+// ======================================================
+// DOCUMENTOS DE TRABAJADORES CONTRATISTAS - 5 PDF
+// Tabla: documentos_contratistas (ver SQL adjunto)
+// NOTA: las rutas de esta sección deben protegerse con
+// autenticación/autorización antes de usarse en producción.
+// ======================================================
+const TIPOS_DOCUMENTOS_CONTRATISTAS = [
+  "alta_imss",
+  "pago_sua",
+  "identificacion_oficial",
+  "certificado_medico",
+  "induccion",
+];
+
+// Directorio oculto dentro del mismo disco persistente de Render.
+// No se publica por express.static (dotfiles: "deny").
+const documentosContratistasDir = path.join(uploadsDir, ".contratistas_privados");
+fs.mkdirSync(documentosContratistasDir, { recursive: true });
+
+const almacenamientoDocumentosContratistas = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, documentosContratistasDir),
+  filename: (req, file, cb) => {
+    const nombre = `${Date.now()}-${require("crypto").randomBytes(16).toString("hex")}.pdf`;
+    cb(null, nombre);
+  },
+});
+
+const subirDocumentoContratista = multer({
+  storage: almacenamientoDocumentosContratistas,
+  limits: { fileSize: 15 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype !== "application/pdf" ||
+        path.extname(file.originalname).toLowerCase() !== ".pdf") {
+      return cb(new Error("Solo se permiten archivos PDF"));
+    }
+    cb(null, true);
+  },
+}).single("archivo");
+
+function ejecutarSubidaDocumentoContratista(req, res, next) {
+  subirDocumentoContratista(req, res, (err) => {
+    if (err) return next(err);
+    next();
+  });
+}
+
+function validarTipoDocumentoContratista(tipo) {
+  return TIPOS_DOCUMENTOS_CONTRATISTAS.includes(tipo);
+}
+
+function eliminarArchivoContratista(ruta) {
+  if (!ruta || typeof ruta !== "string") return;
+  const nombre = path.basename(ruta);
+  if (nombre !== ruta || !/^[a-zA-Z0-9-]+\.pdf$/.test(nombre)) return;
+  fs.unlink(path.join(documentosContratistasDir, nombre), (err) => {
+    if (err && err.code !== "ENOENT") {
+      console.error("No se pudo borrar PDF contratista:", err);
+    }
+  });
+}
+
+// Lista los cinco tipos, incluidos los pendientes de carga.
+app.get("/contratistas/trabajadores/:id/documentos", async (req, res) => {
+  try {
+    const trabajadorId = Number(req.params.id);
+    if (!Number.isSafeInteger(trabajadorId) || trabajadorId <= 0) {
+      return res.status(400).json({ success: false, error: "ID de trabajador inválido" });
+    }
+    const trabajador = await db.query(
+      "SELECT id FROM trabajadores_contratistas WHERE id = $1", [trabajadorId]
+    );
+    if (!trabajador.rowCount) {
+      return res.status(404).json({ success: false, error: "Trabajador contratista no encontrado" });
+    }
+    const datos = await db.query(
+      `SELECT id, tipo_documento, nombre_archivo, fecha_registro, fecha_actualizacion
+       FROM documentos_contratistas WHERE trabajador_contratista_id = $1`,
+      [trabajadorId]
+    );
+    const documentos = TIPOS_DOCUMENTOS_CONTRATISTAS.map((tipo) => {
+      const encontrado = datos.rows.find((fila) => fila.tipo_documento === tipo);
+      return { tipo_documento: tipo, cargado: !!encontrado,
+        id: encontrado?.id ?? null,
+        nombre_archivo: encontrado?.nombre_archivo ?? null,
+        fecha_registro: encontrado?.fecha_registro ?? null,
+        fecha_actualizacion: encontrado?.fecha_actualizacion ?? null };
+    });
+    return res.json({ success: true, trabajador_contratista_id: trabajadorId, documentos });
+  } catch (error) {
+    console.error("Error listando documentos contratistas:", error);
+    return res.status(500).json({ success: false, error: "No se pudieron consultar los documentos" });
+  }
+});
+
+// Subir o reemplazar PDF. multipart/form-data: archivo, tipo_documento.
+async function guardarDocumentoContratista(req, res) {
+  let archivoGuardado = req.file?.filename;
+  try {
+    const trabajadorId = Number(req.params.id);
+    const tipo = req.params.tipo || req.body?.tipo_documento;
+    if (!Number.isSafeInteger(trabajadorId) || trabajadorId <= 0 ||
+        !validarTipoDocumentoContratista(tipo)) {
+      if (archivoGuardado) eliminarArchivoContratista(archivoGuardado);
+      return res.status(400).json({ success: false, error: "Trabajador o tipo de documento inválido" });
+    }
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: "Adjunta el PDF en el campo archivo" });
+    }
+    const firma = Buffer.alloc(5);
+    const fd = fs.openSync(req.file.path, "r");
+    try { fs.readSync(fd, firma, 0, 5, 0); } finally { fs.closeSync(fd); }
+    if (firma.toString("ascii") !== "%PDF-") {
+      eliminarArchivoContratista(archivoGuardado);
+      return res.status(400).json({ success: false, error: "El archivo no es un PDF válido" });
+    }
+    const trabajador = await db.query(
+      "SELECT id FROM trabajadores_contratistas WHERE id = $1", [trabajadorId]
+    );
+    if (!trabajador.rowCount) {
+      eliminarArchivoContratista(archivoGuardado);
+      return res.status(404).json({ success: false, error: "Trabajador contratista no encontrado" });
+    }
+    const anterior = await db.query(
+      `SELECT ruta_archivo FROM documentos_contratistas
+       WHERE trabajador_contratista_id = $1 AND tipo_documento = $2`,
+      [trabajadorId, tipo]
+    );
+    const resultado = await db.query(
+      `INSERT INTO documentos_contratistas
+        (trabajador_contratista_id, tipo_documento, nombre_archivo, ruta_archivo)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (trabajador_contratista_id, tipo_documento)
+       DO UPDATE SET nombre_archivo = EXCLUDED.nombre_archivo,
+         ruta_archivo = EXCLUDED.ruta_archivo,
+         fecha_actualizacion = CURRENT_TIMESTAMP
+       RETURNING id, tipo_documento, nombre_archivo, fecha_registro, fecha_actualizacion`,
+      [trabajadorId, tipo, req.file.originalname, archivoGuardado]
+    );
+    if (anterior.rows[0]?.ruta_archivo && anterior.rows[0].ruta_archivo !== archivoGuardado) {
+      eliminarArchivoContratista(anterior.rows[0].ruta_archivo);
+    }
+    return res.status(200).json({ success: true, documento: resultado.rows[0] });
+  } catch (error) {
+    if (archivoGuardado) eliminarArchivoContratista(archivoGuardado);
+    console.error("Error guardando documento contratista:", error);
+    return res.status(500).json({ success: false, error: "No se pudo guardar el documento" });
+  }
+}
+
+app.post("/contratistas/trabajadores/:id/documentos",
+  ejecutarSubidaDocumentoContratista, guardarDocumentoContratista);
+app.put("/contratistas/trabajadores/:id/documentos/:tipo",
+  ejecutarSubidaDocumentoContratista, guardarDocumentoContratista);
+
+app.get("/contratistas/trabajadores/:id/documentos/:tipo/pdf", async (req, res) => {
+  try {
+    const trabajadorId = Number(req.params.id);
+    const tipo = req.params.tipo;
+    if (!Number.isSafeInteger(trabajadorId) || trabajadorId <= 0 ||
+        !validarTipoDocumentoContratista(tipo)) {
+      return res.status(400).json({ success: false, error: "Parámetros inválidos" });
+    }
+    const resultado = await db.query(
+      `SELECT nombre_archivo, ruta_archivo FROM documentos_contratistas
+       WHERE trabajador_contratista_id = $1 AND tipo_documento = $2`,
+      [trabajadorId, tipo]
+    );
+    if (!resultado.rowCount) {
+      return res.status(404).json({ success: false, error: "Documento no encontrado" });
+    }
+    const nombre = resultado.rows[0].ruta_archivo;
+    if (path.basename(nombre) !== nombre || !/^[a-zA-Z0-9-]+\.pdf$/.test(nombre)) {
+      return res.status(500).json({ success: false, error: "Ruta de documento inválida" });
+    }
+    const ruta = path.join(documentosContratistasDir, nombre);
+    return res.sendFile(ruta, {
+      headers: { "Content-Type": "application/pdf", "Content-Disposition": "inline" },
+    }, (err) => {
+      if (err && !res.headersSent) res.status(err.statusCode || 404).json({ success: false, error: "PDF no disponible" });
+    });
+  } catch (error) {
+    console.error("Error abriendo PDF contratista:", error);
+    return res.status(500).json({ success: false, error: "No se pudo abrir el PDF" });
+  }
+});
+
+app.delete("/contratistas/trabajadores/:id/documentos/:tipo", async (req, res) => {
+  try {
+    const trabajadorId = Number(req.params.id);
+    const tipo = req.params.tipo;
+    if (!Number.isSafeInteger(trabajadorId) || trabajadorId <= 0 ||
+        !validarTipoDocumentoContratista(tipo)) {
+      return res.status(400).json({ success: false, error: "Parámetros inválidos" });
+    }
+    const resultado = await db.query(
+      `DELETE FROM documentos_contratistas
+       WHERE trabajador_contratista_id = $1 AND tipo_documento = $2
+       RETURNING ruta_archivo`,
+      [trabajadorId, tipo]
+    );
+    if (!resultado.rowCount) {
+      return res.status(404).json({ success: false, error: "Documento no encontrado" });
+    }
+    eliminarArchivoContratista(resultado.rows[0].ruta_archivo);
+    return res.json({ success: true, message: "Documento eliminado" });
+  } catch (error) {
+    console.error("Error eliminando documento contratista:", error);
+    return res.status(500).json({ success: false, error: "No se pudo eliminar el documento" });
   }
 });
 
@@ -5050,8 +5470,6 @@ const fechaValidaFormato = (fecha) => {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(fecha));
 };
 
-const normalizarSexoRH = (valor) => String(valor ?? "").trim().toLowerCase() || null;
-
 // =====================================================
 // REGISTRAR TRABAJADOR
 // =====================================================
@@ -5075,7 +5493,6 @@ app.post("/trabajadores", async (req, res) => {
       tipo_sangre,
       fecha_nacimiento,
       curp,
-      sexo,
     } = req.body;
 
     // =================================================
@@ -5124,11 +5541,6 @@ app.post("/trabajadores", async (req, res) => {
 
     const tipoSangreNormalizado =
       normalizarTipoSangre(tipo_sangre);
-
-    const sexoNormalizado = normalizarSexoRH(sexo);
-    if (sexoNormalizado && !["masculino", "femenino", "otro", "no_especificado"].includes(sexoNormalizado)) {
-      return res.status(400).json({ success: false, error: "Sexo inválido." });
-    }
 
     const telefonoNormalizado =
       normalizarTextoOpcional(telefono);
@@ -5353,7 +5765,6 @@ app.post("/trabajadores", async (req, res) => {
         tipo_sangre,
         fecha_nacimiento,
         curp,
-        sexo,
         estatus
       )
       VALUES (
@@ -5368,7 +5779,6 @@ app.post("/trabajadores", async (req, res) => {
         $9,
         $10,
         $11,
-        $12,
         'activo'
       )
       RETURNING *
@@ -5393,7 +5803,6 @@ app.post("/trabajadores", async (req, res) => {
         fecha_nacimiento || null,
 
         curpNormalizada,
-        sexoNormalizado,
       ],
     );
 
@@ -5458,7 +5867,6 @@ app.get("/trabajadores/:clienteId", async (req, res) => {
         t.tipo_sangre,
         t.fecha_nacimiento,
         t.curp,
-        t.sexo,
 
         t.estatus,
         t.created_at,
@@ -5543,7 +5951,6 @@ app.get(
           t.tipo_sangre,
           t.fecha_nacimiento,
           t.curp,
-          t.sexo,
 
           t.estatus,
           t.created_at,
@@ -5684,7 +6091,6 @@ app.put(
         tipo_sangre,
         fecha_nacimiento,
         curp,
-        sexo,
       } = req.body;
 
       // =================================================
@@ -5751,11 +6157,6 @@ app.put(
 
       const tipoSangreNormalizado =
         normalizarTipoSangre(tipo_sangre);
-
-      const sexoNormalizado = normalizarSexoRH(sexo === undefined ? null : sexo);
-      if (sexoNormalizado && !["masculino", "femenino", "otro", "no_especificado"].includes(sexoNormalizado)) {
-        return res.status(400).json({ success: false, error: "Sexo inválido." });
-      }
 
       const telefonoNormalizado =
         normalizarTextoOpcional(telefono);
@@ -6017,12 +6418,11 @@ app.put(
           tipo_sangre = $8,
           fecha_nacimiento = $9,
           curp = $10,
-          sexo = COALESCE($11, sexo),
 
-          estatus = $12,
+          estatus = $11,
           updated_at = CURRENT_TIMESTAMP
 
-        WHERE id = $13
+        WHERE id = $12
 
         RETURNING *
         `,
@@ -6045,7 +6445,6 @@ app.put(
           fecha_nacimiento || null,
 
           curpNormalizada,
-          sexoNormalizado,
 
           estatus,
 
@@ -6226,7 +6625,6 @@ app.put("/trabajadores/:trabajadorId", async (req, res) => {
       telefono,
       fecha_ingreso,
       estatus,
-      sexo,
     } = req.body;
 
     if (!trabajadorId || isNaN(Number(trabajadorId))) {
@@ -6362,11 +6760,6 @@ app.put("/trabajadores/:trabajadorId", async (req, res) => {
       }
     }
 
-    const sexoNormalizado = normalizarSexoRH(sexo);
-    if (sexoNormalizado && !["masculino", "femenino", "otro", "no_especificado"].includes(sexoNormalizado)) {
-      return res.status(400).json({ success: false, error: "Sexo inválido." });
-    }
-
     // =================================================
     // ACTUALIZAR
     // =================================================
@@ -6382,9 +6775,8 @@ app.put("/trabajadores/:trabajadorId", async (req, res) => {
         telefono = $5,
         fecha_ingreso = $6,
         estatus = $7,
-        sexo = COALESCE($8, sexo),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $9
+      WHERE id = $8
       RETURNING *
       `,
       [
@@ -6395,7 +6787,6 @@ app.put("/trabajadores/:trabajadorId", async (req, res) => {
         String(telefono || "").trim() || null,
         fecha_ingreso || null,
         estatus,
-        sexoNormalizado,
         trabajadorId,
       ],
     );
@@ -7131,148 +7522,6 @@ app.get(
   },
 );
 
-
-// =====================================================
-// ESTUDIOS MÉDICOS RH - PDF PRIVADO EN DISK RENDER
-// =====================================================
-const storageEstudiosMedicos = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, estudiosMedicosDir),
-  filename: (req, file, cb) => cb(null, `${crypto.randomUUID()}.pdf`),
-});
-const uploadEstudioMedico = multer({
-  storage: storageEstudiosMedicos,
-  limits: { fileSize: 20 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (path.extname(file.originalname || "").toLowerCase() !== ".pdf" ||
-        file.mimetype !== "application/pdf") {
-      return cb(new Error("Solo se permiten archivos PDF."));
-    }
-    cb(null, true);
-  },
-});
-const limpiarPdfMedico = async (archivo) => {
-  if (!archivo) return;
-  try { await fs.promises.unlink(archivo); }
-  catch (e) { if (e.code !== "ENOENT") console.error("ERROR LIMPIANDO PDF:", e); }
-};
-const recibirPdfMedico = (req, res, next) => {
-  uploadEstudioMedico.single("archivo")(req, res, (error) => {
-    if (error) return res.status(400).json({ success: false, error: error.message });
-    next();
-  });
-};
-
-app.post(
-  "/trabajadores/:trabajadorId/estudios-medicos",
-  verificarTrabajadorEstudios, recibirPdfMedico,
-  async (req, res) => {
-    try {
-      const nombre = String(req.body.nombre_estudio || "").trim();
-      if (!nombre || nombre.length > 255 || !req.file) {
-        await limpiarPdfMedico(req.file?.path);
-        return res.status(400).json({ success: false, error: "Se requiere nombre del estudio y PDF (máx. 20 MB)." });
-      }
-      const archivo = await fs.promises.open(req.file.path, "r");
-      let firma = "";
-      try {
-        const buffer = Buffer.alloc(5);
-        const lectura = await archivo.read(buffer, 0, 5, 0);
-        if (lectura.bytesRead === 5) firma = buffer.toString("ascii");
-      } finally { await archivo.close(); }
-      if (firma !== "%PDF-") {
-        await limpiarPdfMedico(req.file.path);
-        return res.status(400).json({ success: false, error: "El archivo no es un PDF válido." });
-      }
-      const resultado = await db.query(`
-        INSERT INTO trabajadores_estudios_medicos
-          (trabajador_id, nombre_estudio, nombre_archivo, archivo)
-        VALUES ($1, $2, $3, $4)
-        RETURNING id, trabajador_id, nombre_estudio, nombre_archivo, fecha_registro
-      `, [req.params.trabajadorId, nombre, path.basename(req.file.originalname), req.file.filename]);
-      return res.status(201).json({ success: true, message: "Estudio médico guardado.", estudio: resultado.rows[0] });
-    } catch (error) {
-      await limpiarPdfMedico(req.file?.path);
-      console.error("ERROR SUBIENDO ESTUDIO:", error);
-      return res.status(500).json({ success: false, error: "No fue posible guardar el estudio médico." });
-    }
-  }
-);
-
-app.get(
-  "/trabajadores/:trabajadorId/estudios-medicos",
-  verificarTrabajadorEstudios,
-  async (req, res) => {
-    try {
-      const resultado = await db.query(`
-        SELECT id, trabajador_id, nombre_estudio, nombre_archivo, fecha_registro
-        FROM trabajadores_estudios_medicos
-        WHERE trabajador_id = $1
-        ORDER BY fecha_registro DESC, id DESC
-      `, [req.params.trabajadorId]);
-      return res.json({ success: true, estudios: resultado.rows });
-    } catch (error) {
-      console.error("ERROR LISTANDO ESTUDIOS:", error);
-      return res.status(500).json({ success: false, error: "No fue posible consultar estudios médicos." });
-    }
-  }
-);
-
-app.get(
-  "/trabajadores/:trabajadorId/estudios-medicos/:estudioId/pdf",
-  verificarTrabajadorEstudios,
-  async (req, res) => {
-    try {
-      if (!/^\d+$/.test(req.params.estudioId)) {
-        return res.status(400).json({ success: false, error: "Estudio inválido." });
-      }
-      const resultado = await db.query(`
-        SELECT archivo FROM trabajadores_estudios_medicos
-        WHERE id = $1 AND trabajador_id = $2
-      `, [req.params.estudioId, req.params.trabajadorId]);
-      if (!resultado.rows.length) {
-        return res.status(404).json({ success: false, error: "Estudio no encontrado." });
-      }
-      const ruta = path.join(estudiosMedicosDir, path.basename(resultado.rows[0].archivo));
-      res.setHeader("Cache-Control", "no-store");
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      res.setHeader("Content-Disposition", "inline; filename=estudio-medico.pdf");
-      return res.sendFile(ruta, (error) => {
-        if (error && !res.headersSent) {
-          return res.status(error.statusCode || 500).json({ success: false, error: "No fue posible abrir el PDF." });
-        }
-      });
-    } catch (error) {
-      console.error("ERROR ABRIENDO ESTUDIO:", error);
-      return res.status(500).json({ success: false, error: "No fue posible abrir el PDF." });
-    }
-  }
-);
-
-app.delete(
-  "/trabajadores/:trabajadorId/estudios-medicos/:estudioId",
-  verificarTrabajadorEstudios,
-  async (req, res) => {
-    try {
-      if (!/^\d+$/.test(req.params.estudioId)) {
-        return res.status(400).json({ success: false, error: "Estudio inválido." });
-      }
-      const resultado = await db.query(`
-        DELETE FROM trabajadores_estudios_medicos
-        WHERE id = $1 AND trabajador_id = $2
-        RETURNING archivo
-      `, [req.params.estudioId, req.params.trabajadorId]);
-      if (!resultado.rows.length) {
-        return res.status(404).json({ success: false, error: "Estudio no encontrado." });
-      }
-      await limpiarPdfMedico(path.join(estudiosMedicosDir, path.basename(resultado.rows[0].archivo)));
-      return res.json({ success: true, message: "Estudio médico eliminado." });
-    } catch (error) {
-      console.error("ERROR ELIMINANDO ESTUDIO:", error);
-      return res.status(500).json({ success: false, error: "No fue posible eliminar el estudio." });
-    }
-  }
-);
 
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
