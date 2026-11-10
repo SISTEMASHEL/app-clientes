@@ -802,7 +802,12 @@ app.use("/clientes/:clienteId/contratistas", sesionRoles, (req,res,next)=>{
   return res.status(403).json({success:false,error:"Operación no autorizada"});
 });
 app.use("/contratistas/trabajadores/:id/documentos", sesionRoles, accesoDocumentoRoles, (req,res,next)=>{
-  if (req.method==="GET") return next();
+  // RH solo puede validar documentos existentes, nunca subirlos ni eliminarlos.
+  if (req.method === "GET") return next();
+  if (req.method === "PATCH" && /^\/[a-z_]+\/validar$/.test(req.path)) {
+    if (req.usuarioRoles.rol !== "rh") return res.status(403).json({success:false,error:"Solo RH puede validar documentos"});
+    return next();
+  }
   return soloContratistaRoles(req,res,next);
 });
 
@@ -3255,7 +3260,8 @@ app.get("/contratistas/trabajadores/:id/documentos", async (req, res) => {
       return res.status(404).json({ success: false, error: "Trabajador contratista no encontrado" });
     }
     const datos = await db.query(
-      `SELECT id, tipo_documento, nombre_archivo, fecha_registro, fecha_actualizacion
+      `SELECT id, tipo_documento, nombre_archivo, fecha_registro, COALESCE(fecha_actualizacion,fecha_registro) AS fecha_actualizacion,
+              validado_por_usuario_id, fecha_validacion
        FROM documentos_contratistas WHERE trabajador_contratista_id = $1`,
       [trabajadorId]
     );
@@ -3265,7 +3271,10 @@ app.get("/contratistas/trabajadores/:id/documentos", async (req, res) => {
         id: encontrado?.id ?? null,
         nombre_archivo: encontrado?.nombre_archivo ?? null,
         fecha_registro: encontrado?.fecha_registro ?? null,
-        fecha_actualizacion: encontrado?.fecha_actualizacion ?? null };
+        fecha_actualizacion: encontrado?.fecha_actualizacion ?? null,
+        estado: !encontrado ? "rojo" : encontrado.fecha_validacion ? "verde" : "amarillo",
+        validado_por_usuario_id: encontrado?.validado_por_usuario_id ?? null,
+        fecha_validacion: encontrado?.fecha_validacion ?? null };
     });
     return res.json({ success: true, trabajador_contratista_id: trabajadorId, documentos });
   } catch (error) {
@@ -3314,8 +3323,11 @@ async function guardarDocumentoContratista(req, res) {
        ON CONFLICT (trabajador_contratista_id, tipo_documento)
        DO UPDATE SET nombre_archivo = EXCLUDED.nombre_archivo,
          ruta_archivo = EXCLUDED.ruta_archivo,
-         fecha_actualizacion = CURRENT_TIMESTAMP
-       RETURNING id, tipo_documento, nombre_archivo, fecha_registro, fecha_actualizacion`,
+         fecha_actualizacion = CURRENT_TIMESTAMP,
+         validado_por_usuario_id = NULL,
+         fecha_validacion = NULL
+       RETURNING id, tipo_documento, nombre_archivo, fecha_registro, fecha_actualizacion,
+                  validado_por_usuario_id, fecha_validacion`,
       [trabajadorId, tipo, req.file.originalname, archivoGuardado]
     );
     if (anterior.rows[0]?.ruta_archivo && anterior.rows[0].ruta_archivo !== archivoGuardado) {
@@ -3333,6 +3345,42 @@ app.post("/contratistas/trabajadores/:id/documentos",
   ejecutarSubidaDocumentoContratista, guardarDocumentoContratista);
 app.put("/contratistas/trabajadores/:id/documentos/:tipo",
   ejecutarSubidaDocumentoContratista, guardarDocumentoContratista);
+
+// Validación documental: únicamente RH del cliente dueño del trabajador.
+// El middleware sesionRoles + accesoDocumentoRoles ya comprobó identidad y cliente.
+app.patch("/contratistas/trabajadores/:id/documentos/:tipo/validar", async (req, res) => {
+  try {
+    const trabajadorId = idContratistaValido(req.params.id);
+    const tipo = req.params.tipo;
+    if (!trabajadorId || !validarTipoDocumentoContratista(tipo))
+      return res.status(400).json({success:false,error:"Trabajador o tipo de documento inválido"});
+    if (req.usuarioRoles?.rol !== "rh")
+      return res.status(403).json({success:false,error:"Solo RH puede validar documentos"});
+
+    // Evita validar una versión anterior durante un reemplazo concurrente.
+    // El frontend debe enviar el id del documento y su fecha_actualizacion actual.
+    const documentoId = idContratistaValido(req.body?.documento_id);
+    const version = req.body?.fecha_actualizacion;
+    if (!documentoId || typeof version !== "string" || !Number.isFinite(Date.parse(version)))
+      return res.status(400).json({success:false,error:"Se requiere documento_id y fecha_actualizacion"});
+    const resultado = await db.query(
+      `UPDATE documentos_contratistas
+          SET validado_por_usuario_id=$1, fecha_validacion=CURRENT_TIMESTAMP
+        WHERE id=$2 AND trabajador_contratista_id=$3 AND tipo_documento=$4
+          AND COALESCE(fecha_actualizacion,fecha_registro) = $5::timestamptz
+          AND ruta_archivo IS NOT NULL AND ruta_archivo <> ''
+        RETURNING id, tipo_documento, nombre_archivo, fecha_actualizacion,
+                  validado_por_usuario_id, fecha_validacion`,
+      [req.usuarioRoles.id, documentoId, trabajadorId, tipo, version]
+    );
+    if (!resultado.rowCount)
+      return res.status(409).json({success:false,error:"El documento no existe o fue reemplazado. Actualiza la lista antes de validar."});
+    return res.json({success:true,documento:{...resultado.rows[0],estado:"verde"}});
+  } catch (error) {
+    console.error("Error validando documento contratista:",error);
+    return res.status(500).json({success:false,error:"No se pudo validar el documento"});
+  }
+});
 
 app.get("/contratistas/trabajadores/:id/documentos/:tipo/pdf", async (req, res) => {
   try {
