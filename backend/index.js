@@ -144,6 +144,15 @@ if (!fs.existsSync(reportesNomDir)) {
 // Servir públicamente TODO lo almacenado en el Disk de Render.
 // Ruta física: /uploads/archivo.pdf
 // URL pública: https://app-clientes-sr5h.onrender.com/uploads/archivo.pdf
+app.use("/uploads/:archivo", async (req,res,next)=>{
+  try {
+    if (!/^[a-zA-Z0-9-]+\.pdf$/.test(req.params.archivo)) return next();
+    if(req.params.archivo.startsWith("contratista-"))return res.sendStatus(403);
+    const r=await db.query("SELECT 1 FROM documentos_contratistas WHERE ruta_archivo=$1 LIMIT 1",[req.params.archivo]);
+    if(r.rowCount)return res.status(403).json({success:false,error:"PDF privado: usa la ruta autenticada del expediente"});
+    next();
+  } catch(e){console.error("Error protegiendo uploads",e);return res.status(503).json({success:false,error:"Archivo temporalmente no disponible"});}
+});
 app.use(
   "/uploads",
   express.static(uploadsDir, {
@@ -164,6 +173,7 @@ app.use(
 
 // Diagnóstico del Disk
 app.get("/debug-storage", (req, res) => {
+  if(process.env.NODE_ENV === "production") return res.sendStatus(404);
   try {
     const existe = fs.existsSync(uploadsDir);
     const archivos = existe ? fs.readdirSync(uploadsDir) : [];
@@ -188,6 +198,7 @@ app.get("/debug-storage", (req, res) => {
 
 // Diagnóstico de un archivo específico del directorio principal
 app.get("/debug-file/:filename", (req, res) => {
+  if(process.env.NODE_ENV === "production") return res.sendStatus(404);
   try {
     const nombre = path.basename(req.params.filename);
     const ruta = path.join(uploadsDir, nombre);
@@ -654,6 +665,7 @@ app.post(
 );
 
 app.get("/test-uploads", (req, res) => {
+  if(process.env.NODE_ENV === "production") return res.sendStatus(404);
   fs.readdir(uploadsDir, (err, files) => {
     if (err) {
       return res.status(500).json(err);
@@ -709,6 +721,86 @@ const upload = multer({
 // DEVUELVE ROL Y CLIENTE ASIGNADO
 // =====================================================
 
+// ===== SESIONES FIRMADAS Y PERMISOS DE CONTRATISTAS =====
+const cryptoRoles = require("crypto");
+const SESSION_SECRET = process.env.SESSION_SECRET;
+function passwordHashRoles(password) {
+  const salt = cryptoRoles.randomBytes(16).toString("hex");
+  return `scrypt:${salt}:${cryptoRoles.scryptSync(password, salt, 64).toString("hex")}`;
+}
+function passwordValidaRoles(password, stored) {
+  if (typeof stored !== "string") return false;
+  if (!stored.startsWith("scrypt:")) return password === stored; // usuarios legados
+  const partes = stored.split(":");
+  if (partes.length !== 3 || !/^[0-9a-f]{32}$/.test(partes[1]) || !/^[0-9a-f]{128}$/.test(partes[2])) return false;
+  const real = cryptoRoles.scryptSync(password, partes[1], 64);
+  return cryptoRoles.timingSafeEqual(real, Buffer.from(partes[2], "hex"));
+}
+function emitirTokenRoles(id) {
+  if (!SESSION_SECRET || SESSION_SECRET.length < 32) throw Error("Configura SESSION_SECRET (32 caracteres mínimo) en Render");
+  const payload = Buffer.from(JSON.stringify({ id, exp: Date.now() + 8 * 60 * 60 * 1000 })).toString("base64url");
+  const firma = cryptoRoles.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  return `${payload}.${firma}`;
+}
+async function sesionRoles(req, res, next) {
+  try {
+    const token = /^Bearer (.+)$/i.exec(req.headers.authorization || "")?.[1];
+    if (!token || !SESSION_SECRET) return res.status(401).json({ success:false, error:"Inicia sesión nuevamente" });
+    const [payload, firma, extra] = token.split(".");
+    if (!payload || !firma || extra) throw Error("Token inválido");
+    const esperado = cryptoRoles.createHmac("sha256", SESSION_SECRET).update(payload).digest();
+    const recibido = Buffer.from(firma, "base64url");
+    if (esperado.length !== recibido.length || !cryptoRoles.timingSafeEqual(esperado, recibido)) throw Error("Firma inválida");
+    const info = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (!Number.isSafeInteger(info.id) || !Number.isFinite(info.exp) || info.exp < Date.now()) throw Error("Sesión caducada");
+    const r = await db.query("SELECT id, rol, cliente_id, contratista_empresa_id FROM usuarios WHERE id=$1", [info.id]);
+    if (!r.rowCount) throw Error("Usuario inexistente");
+    req.usuarioRoles = r.rows[0];
+    next();
+  } catch (e) { return res.status(401).json({success:false,error:"Sesión inválida o vencida"}); }
+}
+function soloRhRoles(req,res,next) {
+  if (req.usuarioRoles.rol !== "rh" || Number(req.usuarioRoles.cliente_id) !== Number(req.params.clienteId))
+    return res.status(403).json({success:false,error:"Solo RH del cliente puede realizar esta operación"});
+  next();
+}
+function accesoEmpresaRoles(req,res,next) {
+  const u=req.usuarioRoles;
+  if (Number(u.cliente_id)!==Number(req.params.clienteId)) return res.status(403).json({success:false,error:"Cliente no autorizado"});
+  if (u.rol==="rh" || (u.rol==="contratista" && Number(u.contratista_empresa_id)===Number(req.params.empresaId))) return next();
+  return res.status(403).json({success:false,error:"Empresa no autorizada"});
+}
+function soloContratistaRoles(req,res,next) {
+  if (req.usuarioRoles.rol!=="contratista") return res.status(403).json({success:false,error:"Solo el encargado contratista puede modificar trabajadores y documentos"});
+  next();
+}
+async function accesoDocumentoRoles(req,res,next) {
+  try {
+    const r=await db.query(`SELECT ec.cliente_id, ec.id AS empresa_id FROM trabajadores_contratistas tc
+      JOIN empresas_contratistas ec ON ec.id=tc.empresa_contratista_id WHERE tc.id=$1`,[req.params.id]);
+    if (!r.rowCount) return res.status(404).json({success:false,error:"Trabajador no encontrado"});
+    const u=req.usuarioRoles, e=r.rows[0];
+    if (Number(u.cliente_id)!==Number(e.cliente_id) || !(u.rol==="rh" || (u.rol==="contratista" && Number(u.contratista_empresa_id)===Number(e.empresa_id))))
+      return res.status(403).json({success:false,error:"Expediente no autorizado"});
+    next();
+  } catch(e) { console.error(e); res.status(500).json({success:false,error:"Error validando acceso"}); }
+}
+// Los endpoints de contratistas quedan protegidos incluso si el frontend oculta botones.
+app.use("/clientes/:clienteId/contratistas", sesionRoles, (req,res,next)=>{
+  if (req.method==="GET" && req.path==="/") return soloRhRoles(req,res,next);
+  if (/^\/\d+\/cuenta(?:\/|$)/.test(req.path)) return soloRhRoles(req,res,next);
+  if (req.method==="GET" && /^\/\d+$/.test(req.path)) return accesoEmpresaRoles(req,res,next);
+  if (req.method==="GET" && /^\/\d+\/trabajadores$/.test(req.path)) return accesoEmpresaRoles(req,res,next);
+  if (req.method==="POST" && req.path==="/") return soloRhRoles(req,res,next);
+  if (req.method==="PUT" && /^\/\d+$/.test(req.path)) return soloRhRoles(req,res,next);
+  if (/^\/\d+\/trabajadores(?:\/|$)/.test(req.path)) return accesoEmpresaRoles(req,res,()=>soloContratistaRoles(req,res,next));
+  return res.status(403).json({success:false,error:"Operación no autorizada"});
+});
+app.use("/contratistas/trabajadores/:id/documentos", sesionRoles, accesoDocumentoRoles, (req,res,next)=>{
+  if (req.method==="GET") return next();
+  return soloContratistaRoles(req,res,next);
+});
+
 app.post("/login", async (req, res) => {
   try {
     const { usuario, password } = req.body;
@@ -729,24 +821,14 @@ app.post("/login", async (req, res) => {
     // BUSCAR USUARIO
     // ================================================
 
-    const result = await db.query(
-      `
-      SELECT
-        u.id,
-        u.usuario,
-        u.rol,
-        u.cliente_id,
-        c.nombre_empresa AS nombre_cliente
-      FROM usuarios u
-      LEFT JOIN clientes c
-        ON c.id = u.cliente_id
-      WHERE u.usuario = $1
-        AND u.password = $2
-      LIMIT 1
-      `,
-      [usuario, password],
-    );
-
+    const result = await db.query(`SELECT u.id,u.usuario,u.rol,u.cliente_id,u.contratista_empresa_id,u.password,
+      c.nombre_empresa AS nombre_cliente, ec.nombre AS nombre_empresa_contratista
+      FROM usuarios u LEFT JOIN clientes c ON c.id=u.cliente_id
+      LEFT JOIN empresas_contratistas ec ON ec.id=u.contratista_empresa_id
+      WHERE u.usuario=$1 LIMIT 1`,[usuario]);
+    if (!result.rowCount || !passwordValidaRoles(password, result.rows[0].password)) {
+      return res.json({success:false,message:"Usuario o contraseña incorrectos",usuario:null});
+    }
     // ================================================
     // CREDENCIALES INCORRECTAS
     // ================================================
@@ -760,6 +842,12 @@ app.post("/login", async (req, res) => {
     }
 
     const usuarioEncontrado = result.rows[0];
+    if (usuarioEncontrado.rol === "contratista") {
+      if (!usuarioEncontrado.cliente_id || !usuarioEncontrado.contratista_empresa_id)
+        return res.status(403).json({success:false,message:"Cuenta contratista sin empresa asignada",usuario:null});
+      const empresaActiva = await db.query("SELECT id FROM empresas_contratistas WHERE id=$1 AND cliente_id=$2 AND estatus='activa'",[usuarioEncontrado.contratista_empresa_id,usuarioEncontrado.cliente_id]);
+      if (!empresaActiva.rowCount) return res.status(403).json({success:false,message:"Empresa contratista inactiva o no asignada",usuario:null});
+    }
 
     // ================================================
     // VALIDAR USUARIO RH
@@ -793,6 +881,7 @@ app.post("/login", async (req, res) => {
     return res.json({
       success: true,
 
+      token: emitirTokenRoles(usuarioEncontrado.id),
       usuario: {
         id: usuarioEncontrado.id,
         usuario: usuarioEncontrado.usuario,
@@ -800,6 +889,8 @@ app.post("/login", async (req, res) => {
 
         cliente_id: usuarioEncontrado.cliente_id || null,
         nombre_cliente: usuarioEncontrado.nombre_cliente || null,
+        contratista_empresa_id: usuarioEncontrado.contratista_empresa_id || null,
+        nombre_empresa_contratista: usuarioEncontrado.nombre_empresa_contratista || null,
       },
     });
   } catch (error) {
@@ -2861,6 +2952,31 @@ async function validarAreaPuestoContratista(clienteId, areaId, puestoId) {
   return r.rowCount > 0;
 }
 
+// RH administra las credenciales de los encargados de una empresa contratista.
+app.get("/clientes/:clienteId/contratistas/:empresaId/cuenta",sesionRoles,soloRhRoles,async(req,res)=>{
+ try {const r=await db.query("SELECT id,usuario FROM usuarios WHERE rol='contratista' AND cliente_id=$1 AND contratista_empresa_id=$2 ORDER BY id",[req.params.clienteId,req.params.empresaId]);res.json({success:true,cuentas:r.rows});}
+ catch(e){console.error(e);res.status(500).json({success:false,error:"No se pudo consultar cuentas"});}
+});
+app.post("/clientes/:clienteId/contratistas/:empresaId/cuenta",sesionRoles,soloRhRoles,async(req,res)=>{
+ try {
+  const nombre=String(req.body?.usuario||"").trim();const password=String(req.body?.password||"");
+  if(!/^[a-zA-Z0-9._-]{4,60}$/.test(nombre)||password.length<10||password.length>128)
+    return res.status(400).json({success:false,error:"Usuario de 4 a 60 caracteres y contraseña de 10 a 128 caracteres"});
+  const empresa=await db.query("SELECT id FROM empresas_contratistas WHERE id=$1 AND cliente_id=$2",[req.params.empresaId,req.params.clienteId]);
+  if(!empresa.rowCount)return res.status(404).json({success:false,error:"Empresa no encontrada"});
+  const r=await db.query("INSERT INTO usuarios (usuario,password,rol,cliente_id,contratista_empresa_id) VALUES ($1,$2,'contratista',$3,$4) RETURNING id,usuario",[nombre,passwordHashRoles(password),req.params.clienteId,req.params.empresaId]);
+  res.status(201).json({success:true,cuenta:r.rows[0]});
+ }catch(e){console.error(e);res.status(e.code==='23505'?409:500).json({success:false,error:e.code==='23505'?"El usuario ya existe":"No se pudo crear la cuenta"});}
+});
+app.put("/clientes/:clienteId/contratistas/:empresaId/cuenta/:cuentaId",sesionRoles,soloRhRoles,async(req,res)=>{
+ try {
+  const password=String(req.body?.password||"");
+  if(password.length<10||password.length>128)return res.status(400).json({success:false,error:"Contraseña de 10 a 128 caracteres"});
+  const r=await db.query("UPDATE usuarios SET password=$1 WHERE id=$2 AND rol='contratista' AND cliente_id=$3 AND contratista_empresa_id=$4 RETURNING id,usuario",[passwordHashRoles(password),req.params.cuentaId,req.params.clienteId,req.params.empresaId]);
+  if(!r.rowCount)return res.status(404).json({success:false,error:"Cuenta no encontrada"});
+  res.json({success:true,cuenta:r.rows[0]});
+ }catch(e){console.error(e);res.status(500).json({success:false,error:"No se pudo actualizar la contraseña"});}
+});
 // Empresas de un cliente
 app.get("/clientes/:clienteId/contratistas", async (req, res) => {
   const clienteId = idContratistaValido(req.params.clienteId);
@@ -3079,7 +3195,7 @@ fs.mkdirSync(documentosContratistasDir, { recursive: true });
 const almacenamientoDocumentosContratistas = multer.diskStorage({
   destination: (req, file, cb) => cb(null, documentosContratistasDir),
   filename: (req, file, cb) => {
-    const nombre = `${Date.now()}-${require("crypto").randomBytes(16).toString("hex")}.pdf`;
+    const nombre = `contratista-${Date.now()}-${require("crypto").randomBytes(16).toString("hex")}.pdf`;
     cb(null, nombre);
   },
 });
