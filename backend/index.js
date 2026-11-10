@@ -7698,6 +7698,121 @@ app.get(
 );
 
 
+
+// =====================================================
+// ESTUDIOS MEDICOS DE TRABAJADORES (PDF PRIVADOS)
+// Requiere SQL_ESTUDIOS_MEDICOS_RH.txt y token Bearer de RH.
+// =====================================================
+const estudiosMedicosDir = path.join(uploadsDir, ".estudios_medicos_privados");
+fs.mkdirSync(estudiosMedicosDir, { recursive: true });
+const uploadEstudioMedico = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (path.extname(file.originalname || "").toLowerCase() !== ".pdf" ||
+        file.mimetype !== "application/pdf") {
+      return cb(new Error("Solo se permiten archivos PDF"));
+    }
+    cb(null, true);
+  },
+}).single("archivo");
+
+async function accesoEstudiosMedicosRh(req, res, next) {
+  try {
+    if (req.usuarioRoles?.rol !== "rh") {
+      return res.status(403).json({ success: false, error: "Solo RH puede consultar estudios médicos" });
+    }
+    const trabajadorId = Number(req.params.id);
+    if (!Number.isSafeInteger(trabajadorId) || trabajadorId <= 0) {
+      return res.status(400).json({ success: false, error: "Trabajador inválido" });
+    }
+    const r = await db.query("SELECT id, cliente_id FROM trabajadores WHERE id=$1", [trabajadorId]);
+    if (!r.rowCount) return res.status(404).json({ success: false, error: "Trabajador no encontrado" });
+    if (Number(r.rows[0].cliente_id) !== Number(req.usuarioRoles.cliente_id)) {
+      return res.status(403).json({ success: false, error: "Trabajador de otro cliente" });
+    }
+    next();
+  } catch (e) {
+    console.error("Acceso estudios médicos:", e);
+    res.status(500).json({ success: false, error: "No fue posible verificar el acceso" });
+  }
+}
+
+app.use("/trabajadores/:id/estudios-medicos", sesionRoles, accesoEstudiosMedicosRh);
+
+app.get("/trabajadores/:id/estudios-medicos", async (req, res) => {
+  try {
+    const r = await db.query(`SELECT id, trabajador_id, nombre_estudio, nombre_archivo, fecha_registro
+      FROM estudios_medicos_trabajadores WHERE trabajador_id=$1 ORDER BY fecha_registro DESC, id DESC`, [req.params.id]);
+    res.json({ success: true, estudios: r.rows });
+  } catch (e) {
+    console.error("Listar estudios médicos:", e);
+    res.status(500).json({ success: false, error: "No fue posible consultar estudios médicos" });
+  }
+});
+
+app.post("/trabajadores/:id/estudios-medicos", (req, res, next) => {
+  uploadEstudioMedico(req, res, err => {
+    if (err) return res.status(400).json({ success: false, error: err.code === "LIMIT_FILE_SIZE" ? "El PDF supera 20 MB" : err.message });
+    next();
+  });
+}, async (req, res) => {
+  let rutaFisica;
+  try {
+    const nombre = String(req.body.nombre_estudio || "").trim();
+    if (!nombre || nombre.length > 255) return res.status(400).json({ success: false, error: "Escribe el nombre del estudio (máximo 255 caracteres)" });
+    if (!req.file || !req.file.buffer || req.file.buffer.subarray(0, 5).toString() !== "%PDF-") {
+      return res.status(400).json({ success: false, error: "Selecciona un PDF válido" });
+    }
+    const archivo = `estudio-${cryptoRoles.randomUUID()}.pdf`;
+    rutaFisica = path.join(estudiosMedicosDir, archivo);
+    await fs.promises.writeFile(rutaFisica, req.file.buffer, { flag: "wx" });
+    const r = await db.query(`INSERT INTO estudios_medicos_trabajadores
+      (trabajador_id, nombre_estudio, nombre_archivo, archivo_interno)
+      VALUES ($1,$2,$3,$4) RETURNING id, trabajador_id, nombre_estudio, nombre_archivo, fecha_registro`,
+      [req.params.id, nombre, path.basename(req.file.originalname || "estudio.pdf"), archivo]);
+    res.status(201).json({ success: true, estudio: r.rows[0] });
+  } catch (e) {
+    if (rutaFisica) await fs.promises.unlink(rutaFisica).catch(() => {});
+    console.error("Subir estudio médico:", e);
+    res.status(500).json({ success: false, error: "No fue posible guardar el estudio" });
+  }
+});
+
+app.get("/trabajadores/:id/estudios-medicos/:estudioId/pdf", async (req, res) => {
+  try {
+    const r = await db.query("SELECT archivo_interno, nombre_archivo FROM estudios_medicos_trabajadores WHERE id=$1 AND trabajador_id=$2", [req.params.estudioId, req.params.id]);
+    if (!r.rowCount) return res.status(404).json({ success: false, error: "Estudio no encontrado" });
+    const archivo = r.rows[0].archivo_interno;
+    if (!/^estudio-[0-9a-f-]+\.pdf$/.test(archivo)) return res.status(500).json({ success: false, error: "Archivo inválido" });
+    const ruta = path.join(estudiosMedicosDir, archivo);
+    await fs.promises.access(ruta, fs.constants.R_OK);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Content-Disposition", "inline; filename=estudio-medico.pdf");
+    res.sendFile(ruta);
+  } catch (e) {
+    if (e.code === "ENOENT") return res.status(404).json({ success: false, error: "PDF no disponible" });
+    console.error("Abrir estudio médico:", e);
+    res.status(500).json({ success: false, error: "No fue posible abrir el PDF" });
+  }
+});
+
+app.delete("/trabajadores/:id/estudios-medicos/:estudioId", async (req, res) => {
+  try {
+    const r = await db.query("DELETE FROM estudios_medicos_trabajadores WHERE id=$1 AND trabajador_id=$2 RETURNING archivo_interno", [req.params.estudioId, req.params.id]);
+    if (!r.rowCount) return res.status(404).json({ success: false, error: "Estudio no encontrado" });
+    const archivo = r.rows[0].archivo_interno;
+    if (/^estudio-[0-9a-f-]+\.pdf$/.test(archivo)) {
+      await fs.promises.unlink(path.join(estudiosMedicosDir, archivo)).catch(e => console.error("PDF pendiente de limpieza:", e));
+    }
+    res.json({ success: true });
+  } catch (e) {
+    console.error("Eliminar estudio médico:", e);
+    res.status(500).json({ success: false, error: "No fue posible eliminar el estudio" });
+  }
+});
+
 // ------------------- INICIAR SERVIDOR -------------------
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor backend escuchando en el puerto ${PORT}`);
