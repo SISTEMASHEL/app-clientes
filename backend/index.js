@@ -715,77 +715,22 @@ const upload = multer({
 
 // ------------------- RUTAS (TODO IGUAL) -------------------
 
-// =====================================================
-// TOKEN DE SESIÓN FIRMADO PARA ESTUDIOS MÉDICOS
-// Requiere SESSION_SECRET >= 32 caracteres en Render.
-// =====================================================
-const codificarToken = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64url");
-const crearTokenRH = (usuario) => {
-  const secreto = process.env.SESSION_SECRET;
-  if (!secreto || secreto.length < 32) return null;
-  const payload = codificarToken({
-    sub: String(usuario.id),
-    exp: Math.floor(Date.now() / 1000) + 8 * 60 * 60,
-  });
-  const firma = crypto.createHmac("sha256", secreto).update(payload).digest("base64url");
-  return `${payload}.${firma}`;
-};
-
-const autenticarRH = async (req, res, next) => {
-  try {
-    const secreto = process.env.SESSION_SECRET;
-    if (!secreto || secreto.length < 32) {
-      return res.status(503).json({ success: false, error: "SESSION_SECRET no configurado." });
-    }
-    const coincidencia = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || "");
-    const partes = coincidencia?.[1]?.split(".");
-    if (!partes || partes.length !== 2) {
-      return res.status(401).json({ success: false, error: "Sesión requerida." });
-    }
-    const [payload, firma] = partes;
-    const firmaCorrecta = crypto.createHmac("sha256", secreto).update(payload).digest();
-    const firmaRecibida = Buffer.from(firma, "base64url");
-    if (firmaRecibida.length !== firmaCorrecta.length ||
-        !crypto.timingSafeEqual(firmaRecibida, firmaCorrecta)) {
-      return res.status(401).json({ success: false, error: "Sesión inválida." });
-    }
-    const datos = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    if (!Number.isSafeInteger(datos.exp) || datos.exp <= Date.now() / 1000 ||
-        !/^\d+$/.test(String(datos.sub))) {
-      return res.status(401).json({ success: false, error: "Sesión expirada o inválida." });
-    }
-    // Consultar permisos ACTUALES en la base de datos, no confiar en el token para el rol.
-    const usuario = await db.query(
-      "SELECT id, rol, cliente_id FROM usuarios WHERE id = $1 LIMIT 1", [datos.sub]
-    );
-    if (!usuario.rows.length || usuario.rows[0].rol !== "rh" || !usuario.rows[0].cliente_id) {
-      return res.status(403).json({ success: false, error: "Acceso RH no autorizado." });
-    }
-    req.usuario = usuario.rows[0];
-    next();
-  } catch (error) {
-    console.error("ERROR AUTENTICANDO RH:", error);
-    return res.status(401).json({ success: false, error: "Sesión inválida." });
-  }
-};
-
-const autorizarTrabajadorRH = async (req, res, next) => {
+// Valida la existencia del trabajador. Sin una sesion autenticada,
+// este control NO verifica quien solicita el expediente medico.
+const verificarTrabajadorEstudios = async (req, res, next) => {
   try {
     const trabajadorId = Number(req.params.trabajadorId);
     if (!Number.isSafeInteger(trabajadorId) || trabajadorId <= 0) {
-      return res.status(400).json({ success: false, error: "Trabajador inválido." });
+      return res.status(400).json({ success: false, error: "Trabajador invalido." });
     }
-    const resultado = await db.query(
-      "SELECT id FROM trabajadores WHERE id = $1 AND cliente_id = $2",
-      [trabajadorId, req.usuario.cliente_id]
-    );
+    const resultado = await db.query("SELECT id FROM trabajadores WHERE id = $1", [trabajadorId]);
     if (!resultado.rows.length) {
       return res.status(404).json({ success: false, error: "Trabajador no encontrado." });
     }
     next();
   } catch (error) {
-    console.error("ERROR AUTORIZANDO TRABAJADOR:", error);
-    return res.status(500).json({ success: false, error: "Error verificando permisos." });
+    console.error("ERROR VERIFICANDO TRABAJADOR:", error);
+    return res.status(500).json({ success: false, error: "Error verificando trabajador." });
   }
 };
 
@@ -877,7 +822,6 @@ app.post("/login", async (req, res) => {
 
     return res.json({
       success: true,
-      token: crearTokenRH(usuarioEncontrado),
 
       usuario: {
         id: usuarioEncontrado.id,
@@ -7220,7 +7164,7 @@ const recibirPdfMedico = (req, res, next) => {
 
 app.post(
   "/trabajadores/:trabajadorId/estudios-medicos",
-  autenticarRH, autorizarTrabajadorRH, recibirPdfMedico,
+  verificarTrabajadorEstudios, recibirPdfMedico,
   async (req, res) => {
     try {
       const nombre = String(req.body.nombre_estudio || "").trim();
@@ -7256,7 +7200,7 @@ app.post(
 
 app.get(
   "/trabajadores/:trabajadorId/estudios-medicos",
-  autenticarRH, autorizarTrabajadorRH,
+  verificarTrabajadorEstudios,
   async (req, res) => {
     try {
       const resultado = await db.query(`
@@ -7275,7 +7219,7 @@ app.get(
 
 app.get(
   "/trabajadores/:trabajadorId/estudios-medicos/:estudioId/pdf",
-  autenticarRH, autorizarTrabajadorRH,
+  verificarTrabajadorEstudios,
   async (req, res) => {
     try {
       if (!/^\d+$/.test(req.params.estudioId)) {
@@ -7307,7 +7251,7 @@ app.get(
 
 app.delete(
   "/trabajadores/:trabajadorId/estudios-medicos/:estudioId",
-  autenticarRH, autorizarTrabajadorRH,
+  verificarTrabajadorEstudios,
   async (req, res) => {
     try {
       if (!/^\d+$/.test(req.params.estudioId)) {
