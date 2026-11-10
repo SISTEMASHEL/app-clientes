@@ -737,7 +737,7 @@ const autenticarRH = async (req, res, next) => {
     if (!secreto || secreto.length < 32) {
       return res.status(503).json({ success: false, error: "SESSION_SECRET no configurado." });
     }
-    const coincidencia = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || "");
+    const coincidencia = /^Bearer\\s+(.+)$/i.exec(req.headers.authorization || "");
     const partes = coincidencia?.[1]?.split(".");
     if (!partes || partes.length !== 2) {
       return res.status(401).json({ success: false, error: "Sesión requerida." });
@@ -751,7 +751,7 @@ const autenticarRH = async (req, res, next) => {
     }
     const datos = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     if (!Number.isSafeInteger(datos.exp) || datos.exp <= Date.now() / 1000 ||
-        !/^\d+$/.test(String(datos.sub))) {
+        !/^\\d+$/.test(String(datos.sub))) {
       return res.status(401).json({ success: false, error: "Sesión expirada o inválida." });
     }
     // Consultar permisos ACTUALES en la base de datos, no confiar en el token para el rol.
@@ -877,7 +877,6 @@ app.post("/login", async (req, res) => {
 
     return res.json({
       success: true,
-      // El frontend debe conservar este token y enviarlo en Authorization: Bearer ...
       token: crearTokenRH(usuarioEncontrado),
 
       usuario: {
@@ -5065,37 +5064,53 @@ app.put("/seguimiento-condiciones/:detalleId", async (req, res) => {
 // =====================================================
 
 // =====================================================
-// REGISTRAR TRABAJADOR
+// FUNCIONES AUXILIARES TRABAJADORES
 // =====================================================
 
-// =====================================================
-// DATOS ADICIONALES DE TRABAJADORES (RH)
-// =====================================================
-const normalizarNssRH = (v) => String(v ?? "").trim() || null;
-const normalizarCurpRH = (v) => String(v ?? "").trim().toUpperCase() || null;
-const normalizarSangreRH = (v) => String(v ?? "").trim().toUpperCase() || null;
-const normalizarSexoRH = (v) => String(v ?? "").trim().toLowerCase() || null;
-const validarDatosRH = (d) => {
-  const nss = normalizarNssRH(d.nss);
-  const curp = normalizarCurpRH(d.curp);
-  const sangre = normalizarSangreRH(d.tipo_sangre);
-  const sexo = normalizarSexoRH(d.sexo);
-  if (nss && !/^\d{11}$/.test(nss)) return "El NSS debe tener 11 dígitos.";
-  if (curp && !/^[A-Z0-9]{18}$/.test(curp)) return "La CURP debe tener 18 caracteres alfanuméricos.";
-  if (sangre && !["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].includes(sangre)) return "Tipo de sangre inválido.";
-  if (sexo && !["masculino", "femenino", "otro", "no_especificado"].includes(sexo)) return "Sexo inválido.";
-  if (d.fecha_nacimiento) {
-    const fecha = d.fecha_nacimiento instanceof Date
-      ? d.fecha_nacimiento.toISOString().slice(0, 10)
-      : String(d.fecha_nacimiento).slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) ||
-        Number.isNaN(Date.parse(fecha)) ||
-        new Date(`${fecha}T00:00:00Z`).toISOString().slice(0, 10) !== fecha) {
-      return "Fecha de nacimiento inválida.";
-    }
-  }
-  return null;
+const normalizarTextoOpcional = (valor) => {
+  const texto = String(valor || "").trim();
+  return texto || null;
 };
+
+const normalizarCurp = (valor) => {
+  const texto = String(valor || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+
+  return texto || null;
+};
+
+const normalizarNss = (valor) => {
+  const texto = String(valor || "")
+    .trim()
+    .replace(/\s+/g, "");
+
+  return texto || null;
+};
+
+const normalizarTipoSangre = (valor) => {
+  const texto = String(valor || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+
+  return texto || null;
+};
+
+const fechaValidaFormato = (fecha) => {
+  if (!fecha) {
+    return true;
+  }
+
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(fecha));
+};
+
+const normalizarSexoRH = (valor) => String(valor ?? "").trim().toLowerCase() || null;
+
+// =====================================================
+// REGISTRAR TRABAJADOR
+// =====================================================
 
 app.post("/trabajadores", async (req, res) => {
   try {
@@ -5107,11 +5122,20 @@ app.post("/trabajadores", async (req, res) => {
       nombre,
       telefono,
       fecha_ingreso,
-      nss, tipo_sangre, fecha_nacimiento, curp, sexo,
+
+      // ===============================================
+      // NUEVOS DATOS
+      // ===============================================
+
+      nss,
+      tipo_sangre,
+      fecha_nacimiento,
+      curp,
+      sexo,
     } = req.body;
 
     // =================================================
-    // VALIDACIONES
+    // VALIDACIONES BÁSICAS
     // =================================================
 
     if (!cliente_id || isNaN(Number(cliente_id))) {
@@ -5142,8 +5166,108 @@ app.post("/trabajadores", async (req, res) => {
       });
     }
 
-    const errorDatos = validarDatosRH({ nss, tipo_sangre, fecha_nacimiento, curp, sexo });
-    if (errorDatos) return res.status(400).json({ success: false, error: errorDatos });
+    // =================================================
+    // NORMALIZAR DATOS
+    // =================================================
+
+    const numeroEmpleadoNormalizado = String(
+      numero_empleado || "",
+    ).trim();
+
+    const nssNormalizado = normalizarNss(nss);
+
+    const curpNormalizada = normalizarCurp(curp);
+
+    const tipoSangreNormalizado =
+      normalizarTipoSangre(tipo_sangre);
+
+    const sexoNormalizado = normalizarSexoRH(sexo);
+    if (sexoNormalizado && !["masculino", "femenino", "otro", "no_especificado"].includes(sexoNormalizado)) {
+      return res.status(400).json({ success: false, error: "Sexo inválido." });
+    }
+
+    const telefonoNormalizado =
+      normalizarTextoOpcional(telefono);
+
+    // =================================================
+    // VALIDAR NSS
+    // =================================================
+
+    if (
+      nssNormalizado &&
+      !/^\d{11}$/.test(nssNormalizado)
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "El Número de Seguro Social (NSS) debe contener exactamente 11 dígitos.",
+      });
+    }
+
+    // =================================================
+    // VALIDAR CURP
+    // =================================================
+
+    if (
+      curpNormalizada &&
+      curpNormalizada.length !== 18
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "La CURP debe contener exactamente 18 caracteres.",
+      });
+    }
+
+    // =================================================
+    // VALIDAR TIPO DE SANGRE
+    // =================================================
+
+    const tiposSangrePermitidos = [
+      "A+",
+      "A-",
+      "B+",
+      "B-",
+      "AB+",
+      "AB-",
+      "O+",
+      "O-",
+    ];
+
+    if (
+      tipoSangreNormalizado &&
+      !tiposSangrePermitidos.includes(
+        tipoSangreNormalizado,
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Tipo de sangre inválido.",
+      });
+    }
+
+    // =================================================
+    // VALIDAR FECHA DE NACIMIENTO
+    // =================================================
+
+    if (!fechaValidaFormato(fecha_nacimiento)) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "La fecha de nacimiento debe tener formato AAAA-MM-DD.",
+      });
+    }
+
+    // =================================================
+    // VALIDAR FECHA DE INGRESO
+    // =================================================
+
+    if (!fechaValidaFormato(fecha_ingreso)) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "La fecha de ingreso debe tener formato AAAA-MM-DD.",
+      });
+    }
 
     // =================================================
     // VALIDAR QUE EL ÁREA PERTENEZCA AL CLIENTE
@@ -5162,7 +5286,8 @@ app.post("/trabajadores", async (req, res) => {
     if (areaResult.rows.length === 0) {
       return res.status(400).json({
         success: false,
-        error: "El área seleccionada no pertenece al cliente.",
+        error:
+          "El área seleccionada no pertenece al cliente.",
       });
     }
 
@@ -5172,7 +5297,9 @@ app.post("/trabajadores", async (req, res) => {
 
     const puestoResult = await db.query(
       `
-      SELECT id, puesto
+      SELECT
+        id,
+        puesto
       FROM puestos_trabajo
       WHERE id = $1
         AND area_id = $2
@@ -5183,17 +5310,10 @@ app.post("/trabajadores", async (req, res) => {
     if (puestoResult.rows.length === 0) {
       return res.status(400).json({
         success: false,
-        error: "El puesto seleccionado no pertenece al área.",
+        error:
+          "El puesto seleccionado no pertenece al área.",
       });
     }
-
-    // =================================================
-    // NORMALIZAR NÚMERO DE EMPLEADO
-    // =================================================
-
-    const numeroEmpleadoNormalizado = String(
-      numero_empleado || "",
-    ).trim();
 
     // =================================================
     // VALIDAR NÚMERO DE EMPLEADO DUPLICADO
@@ -5208,7 +5328,10 @@ app.post("/trabajadores", async (req, res) => {
           AND numero_empleado = $2
         LIMIT 1
         `,
-        [cliente_id, numeroEmpleadoNormalizado],
+        [
+          cliente_id,
+          numeroEmpleadoNormalizado,
+        ],
       );
 
       if (empleadoExistente.rows.length > 0) {
@@ -5221,7 +5344,55 @@ app.post("/trabajadores", async (req, res) => {
     }
 
     // =================================================
-    // INSERTAR
+    // VALIDAR CURP DUPLICADA
+    // =================================================
+
+    if (curpNormalizada) {
+      const curpExistente = await db.query(
+        `
+        SELECT id
+        FROM trabajadores
+        WHERE UPPER(curp) = $1
+        LIMIT 1
+        `,
+        [curpNormalizada],
+      );
+
+      if (curpExistente.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Ya existe un trabajador registrado con esa CURP.",
+        });
+      }
+    }
+
+    // =================================================
+    // VALIDAR NSS DUPLICADO
+    // =================================================
+
+    if (nssNormalizado) {
+      const nssExistente = await db.query(
+        `
+        SELECT id
+        FROM trabajadores
+        WHERE nss = $1
+        LIMIT 1
+        `,
+        [nssNormalizado],
+      );
+
+      if (nssExistente.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Ya existe un trabajador registrado con ese NSS.",
+        });
+      }
+    }
+
+    // =================================================
+    // INSERTAR TRABAJADOR
     // =================================================
 
     const resultado = await db.query(
@@ -5234,7 +5405,11 @@ app.post("/trabajadores", async (req, res) => {
         nombre,
         telefono,
         fecha_ingreso,
-        nss, tipo_sangre, fecha_nacimiento, curp, sexo,
+        nss,
+        tipo_sangre,
+        fecha_nacimiento,
+        curp,
+        sexo,
         estatus
       )
       VALUES (
@@ -5245,40 +5420,64 @@ app.post("/trabajadores", async (req, res) => {
         $5,
         $6,
         $7,
-        $8, $9, $10, $11, $12,
+        $8,
+        $9,
+        $10,
+        $11,
+        $12,
         'activo'
       )
       RETURNING *
       `,
       [
-        cliente_id,
-        area_id,
-        puesto_id,
+        Number(cliente_id),
+        Number(area_id),
+        Number(puesto_id),
+
         numeroEmpleadoNormalizado || null,
+
         String(nombre).trim(),
-        String(telefono || "").trim() || null,
+
+        telefonoNormalizado,
+
         fecha_ingreso || null,
-        normalizarNssRH(nss), normalizarSangreRH(tipo_sangre),
-        fecha_nacimiento || null, normalizarCurpRH(curp), normalizarSexoRH(sexo),
+
+        nssNormalizado,
+
+        tipoSangreNormalizado,
+
+        fecha_nacimiento || null,
+
+        curpNormalizada,
+        sexoNormalizado,
       ],
     );
 
+    console.log("====================================");
+    console.log("TRABAJADOR REGISTRADO");
+    console.log(resultado.rows[0]);
+    console.log("====================================");
+
     return res.status(201).json({
       success: true,
-      message: "Trabajador registrado correctamente.",
+      message:
+        "Trabajador registrado correctamente.",
       trabajador: resultado.rows[0],
     });
   } catch (error) {
-    console.log("ERROR REGISTRANDO TRABAJADOR:", error);
+    console.log(
+      "ERROR REGISTRANDO TRABAJADOR:",
+      error,
+    );
 
     return res.status(500).json({
       success: false,
-      error: "No fue posible registrar el trabajador.",
+      error:
+        "No fue posible registrar el trabajador.",
       detalle: error.message,
     });
   }
 });
-
 
 // =====================================================
 // OBTENER TRABAJADORES DE UN CLIENTE
@@ -5288,7 +5487,10 @@ app.get("/trabajadores/:clienteId", async (req, res) => {
   try {
     const { clienteId } = req.params;
 
-    if (!clienteId || isNaN(Number(clienteId))) {
+    if (
+      !clienteId ||
+      isNaN(Number(clienteId))
+    ) {
       return res.status(400).json({
         success: false,
         error: "Cliente inválido.",
@@ -5302,11 +5504,18 @@ app.get("/trabajadores/:clienteId", async (req, res) => {
         t.cliente_id,
         t.area_id,
         t.puesto_id,
+
         t.numero_empleado,
         t.nombre,
         t.telefono,
         t.fecha_ingreso,
-        t.nss, t.tipo_sangre, t.fecha_nacimiento, t.curp, t.sexo,
+
+        t.nss,
+        t.tipo_sangre,
+        t.fecha_nacimiento,
+        t.curp,
+        t.sexo,
+
         t.estatus,
         t.created_at,
         t.updated_at,
@@ -5339,15 +5548,596 @@ app.get("/trabajadores/:clienteId", async (req, res) => {
       trabajadores: resultado.rows,
     });
   } catch (error) {
-    console.log("ERROR CONSULTANDO TRABAJADORES:", error);
+    console.log(
+      "ERROR CONSULTANDO TRABAJADORES:",
+      error,
+    );
 
     return res.status(500).json({
       success: false,
-      error: "No fue posible consultar los trabajadores.",
+      error:
+        "No fue posible consultar los trabajadores.",
       detalle: error.message,
     });
   }
 });
+
+// =====================================================
+// OBTENER TRABAJADORES DE UN PUESTO
+// =====================================================
+
+app.get(
+  "/trabajadores/puesto/:puestoId",
+  async (req, res) => {
+    try {
+      const { puestoId } = req.params;
+
+      if (
+        !puestoId ||
+        isNaN(Number(puestoId))
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Puesto inválido.",
+        });
+      }
+
+      const resultado = await db.query(
+        `
+        SELECT
+          t.id,
+          t.cliente_id,
+          t.area_id,
+          t.puesto_id,
+
+          t.numero_empleado,
+          t.nombre,
+          t.telefono,
+          t.fecha_ingreso,
+
+          t.nss,
+          t.tipo_sangre,
+          t.fecha_nacimiento,
+          t.curp,
+          t.sexo,
+
+          t.estatus,
+          t.created_at,
+          t.updated_at,
+
+          a.nombre_area,
+
+          p.puesto AS nombre_puesto
+
+        FROM trabajadores t
+
+        INNER JOIN areas_trabajo a
+          ON a.id = t.area_id
+
+        INNER JOIN puestos_trabajo p
+          ON p.id = t.puesto_id
+
+        WHERE t.puesto_id = $1
+          AND t.estatus = 'activo'
+
+        ORDER BY t.nombre ASC
+        `,
+        [puestoId],
+      );
+
+      return res.json({
+        success: true,
+        total: resultado.rows.length,
+        trabajadores: resultado.rows,
+      });
+    } catch (error) {
+      console.log(
+        "ERROR CONSULTANDO TRABAJADORES DEL PUESTO:",
+        error,
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "No fue posible consultar los trabajadores del puesto.",
+        detalle: error.message,
+      });
+    }
+  },
+);
+
+// =====================================================
+// OBTENER UN TRABAJADOR
+// =====================================================
+
+app.get(
+  "/trabajador/:trabajadorId",
+  async (req, res) => {
+    try {
+      const { trabajadorId } = req.params;
+
+      if (
+        !trabajadorId ||
+        isNaN(Number(trabajadorId))
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Trabajador inválido.",
+        });
+      }
+
+      const resultado = await db.query(
+        `
+        SELECT
+          t.*,
+          a.nombre_area,
+          p.puesto AS nombre_puesto
+
+        FROM trabajadores t
+
+        INNER JOIN areas_trabajo a
+          ON a.id = t.area_id
+
+        INNER JOIN puestos_trabajo p
+          ON p.id = t.puesto_id
+
+        WHERE t.id = $1
+        `,
+        [trabajadorId],
+      );
+
+      if (resultado.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: "Trabajador no encontrado.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        trabajador: resultado.rows[0],
+      });
+    } catch (error) {
+      console.log(
+        "ERROR CONSULTANDO TRABAJADOR:",
+        error,
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "No fue posible consultar el trabajador.",
+        detalle: error.message,
+      });
+    }
+  },
+);
+
+// =====================================================
+// ACTUALIZAR TRABAJADOR
+// =====================================================
+
+app.put(
+  "/trabajadores/:trabajadorId",
+  async (req, res) => {
+    try {
+      const { trabajadorId } = req.params;
+
+      const {
+        area_id,
+        puesto_id,
+        numero_empleado,
+        nombre,
+        telefono,
+        fecha_ingreso,
+        estatus,
+
+        // =============================================
+        // NUEVOS DATOS
+        // =============================================
+
+        nss,
+        tipo_sangre,
+        fecha_nacimiento,
+        curp,
+        sexo,
+      } = req.body;
+
+      // =================================================
+      // VALIDACIONES BÁSICAS
+      // =================================================
+
+      if (
+        !trabajadorId ||
+        isNaN(Number(trabajadorId))
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Trabajador inválido.",
+        });
+      }
+
+      if (!area_id || isNaN(Number(area_id))) {
+        return res.status(400).json({
+          success: false,
+          error: "Área inválida.",
+        });
+      }
+
+      if (
+        !puesto_id ||
+        isNaN(Number(puesto_id))
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Puesto inválido.",
+        });
+      }
+
+      if (!String(nombre || "").trim()) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "El nombre del trabajador es obligatorio.",
+        });
+      }
+
+      if (
+        !["activo", "baja"].includes(estatus)
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Estatus de trabajador inválido.",
+        });
+      }
+
+      // =================================================
+      // NORMALIZAR
+      // =================================================
+
+      const numeroEmpleadoNormalizado =
+        String(numero_empleado || "").trim();
+
+      const nssNormalizado =
+        normalizarNss(nss);
+
+      const curpNormalizada =
+        normalizarCurp(curp);
+
+      const tipoSangreNormalizado =
+        normalizarTipoSangre(tipo_sangre);
+
+      const sexoNormalizado = normalizarSexoRH(sexo === undefined ? null : sexo);
+      if (sexoNormalizado && !["masculino", "femenino", "otro", "no_especificado"].includes(sexoNormalizado)) {
+        return res.status(400).json({ success: false, error: "Sexo inválido." });
+      }
+
+      const telefonoNormalizado =
+        normalizarTextoOpcional(telefono);
+
+      // =================================================
+      // VALIDAR NSS
+      // =================================================
+
+      if (
+        nssNormalizado &&
+        !/^\d{11}$/.test(nssNormalizado)
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "El Número de Seguro Social (NSS) debe contener exactamente 11 dígitos.",
+        });
+      }
+
+      // =================================================
+      // VALIDAR CURP
+      // =================================================
+
+      if (
+        curpNormalizada &&
+        curpNormalizada.length !== 18
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "La CURP debe contener exactamente 18 caracteres.",
+        });
+      }
+
+      // =================================================
+      // VALIDAR TIPO SANGRE
+      // =================================================
+
+      const tiposSangrePermitidos = [
+        "A+",
+        "A-",
+        "B+",
+        "B-",
+        "AB+",
+        "AB-",
+        "O+",
+        "O-",
+      ];
+
+      if (
+        tipoSangreNormalizado &&
+        !tiposSangrePermitidos.includes(
+          tipoSangreNormalizado,
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Tipo de sangre inválido.",
+        });
+      }
+
+      // =================================================
+      // VALIDAR FECHAS
+      // =================================================
+
+      if (
+        !fechaValidaFormato(fecha_nacimiento)
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "La fecha de nacimiento debe tener formato AAAA-MM-DD.",
+        });
+      }
+
+      if (!fechaValidaFormato(fecha_ingreso)) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "La fecha de ingreso debe tener formato AAAA-MM-DD.",
+        });
+      }
+
+      // =================================================
+      // BUSCAR TRABAJADOR ACTUAL
+      // =================================================
+
+      const trabajadorActual =
+        await db.query(
+          `
+          SELECT *
+          FROM trabajadores
+          WHERE id = $1
+          `,
+          [trabajadorId],
+        );
+
+      if (
+        trabajadorActual.rows.length === 0
+      ) {
+        return res.status(404).json({
+          success: false,
+          error: "Trabajador no encontrado.",
+        });
+      }
+
+      const trabajador =
+        trabajadorActual.rows[0];
+
+      // =================================================
+      // VALIDAR ÁREA
+      // =================================================
+
+      const areaResult = await db.query(
+        `
+        SELECT id
+        FROM areas_trabajo
+        WHERE id = $1
+          AND cliente_id = $2
+        `,
+        [
+          area_id,
+          trabajador.cliente_id,
+        ],
+      );
+
+      if (areaResult.rows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "El área seleccionada no pertenece al cliente.",
+        });
+      }
+
+      // =================================================
+      // VALIDAR PUESTO
+      // =================================================
+
+      const puestoResult = await db.query(
+        `
+        SELECT id
+        FROM puestos_trabajo
+        WHERE id = $1
+          AND area_id = $2
+        `,
+        [puesto_id, area_id],
+      );
+
+      if (puestoResult.rows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "El puesto seleccionado no pertenece al área.",
+        });
+      }
+
+      // =================================================
+      // VALIDAR NÚMERO DE EMPLEADO DUPLICADO
+      // =================================================
+
+      if (numeroEmpleadoNormalizado) {
+        const duplicado = await db.query(
+          `
+          SELECT id
+          FROM trabajadores
+          WHERE cliente_id = $1
+            AND numero_empleado = $2
+            AND id <> $3
+          LIMIT 1
+          `,
+          [
+            trabajador.cliente_id,
+            numeroEmpleadoNormalizado,
+            trabajadorId,
+          ],
+        );
+
+        if (duplicado.rows.length > 0) {
+          return res.status(400).json({
+            success: false,
+            error:
+              "Ya existe otro trabajador con ese número de empleado.",
+          });
+        }
+      }
+
+      // =================================================
+      // VALIDAR CURP DUPLICADA
+      // =================================================
+
+      if (curpNormalizada) {
+        const curpExistente = await db.query(
+          `
+          SELECT id
+          FROM trabajadores
+          WHERE UPPER(curp) = $1
+            AND id <> $2
+          LIMIT 1
+          `,
+          [
+            curpNormalizada,
+            trabajadorId,
+          ],
+        );
+
+        if (curpExistente.rows.length > 0) {
+          return res.status(400).json({
+            success: false,
+            error:
+              "Ya existe otro trabajador registrado con esa CURP.",
+          });
+        }
+      }
+
+      // =================================================
+      // VALIDAR NSS DUPLICADO
+      // =================================================
+
+      if (nssNormalizado) {
+        const nssExistente = await db.query(
+          `
+          SELECT id
+          FROM trabajadores
+          WHERE nss = $1
+            AND id <> $2
+          LIMIT 1
+          `,
+          [
+            nssNormalizado,
+            trabajadorId,
+          ],
+        );
+
+        if (nssExistente.rows.length > 0) {
+          return res.status(400).json({
+            success: false,
+            error:
+              "Ya existe otro trabajador registrado con ese NSS.",
+          });
+        }
+      }
+
+      // =================================================
+      // ACTUALIZAR
+      // =================================================
+
+      const resultado = await db.query(
+        `
+        UPDATE trabajadores
+        SET
+          area_id = $1,
+          puesto_id = $2,
+          numero_empleado = $3,
+          nombre = $4,
+          telefono = $5,
+          fecha_ingreso = $6,
+
+          nss = $7,
+          tipo_sangre = $8,
+          fecha_nacimiento = $9,
+          curp = $10,
+          sexo = COALESCE($11, sexo),
+
+          estatus = $12,
+          updated_at = CURRENT_TIMESTAMP
+
+        WHERE id = $13
+
+        RETURNING *
+        `,
+        [
+          Number(area_id),
+          Number(puesto_id),
+
+          numeroEmpleadoNormalizado || null,
+
+          String(nombre).trim(),
+
+          telefonoNormalizado,
+
+          fecha_ingreso || null,
+
+          nssNormalizado,
+
+          tipoSangreNormalizado,
+
+          fecha_nacimiento || null,
+
+          curpNormalizada,
+          sexoNormalizado,
+
+          estatus,
+
+          trabajadorId,
+        ],
+      );
+
+      console.log("====================================");
+      console.log("TRABAJADOR ACTUALIZADO");
+      console.log(resultado.rows[0]);
+      console.log("====================================");
+
+      return res.json({
+        success: true,
+        message:
+          "Trabajador actualizado correctamente.",
+        trabajador: resultado.rows[0],
+      });
+    } catch (error) {
+      console.log(
+        "ERROR ACTUALIZANDO TRABAJADOR:",
+        error,
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "No fue posible actualizar el trabajador.",
+        detalle: error.message,
+      });
+    }
+  },
+);
+
+
+
 
 
 // =====================================================
@@ -5376,7 +6166,6 @@ app.get("/trabajadores/puesto/:puestoId", async (req, res) => {
         t.nombre,
         t.telefono,
         t.fecha_ingreso,
-        t.nss, t.tipo_sangre, t.fecha_nacimiento, t.curp, t.sexo,
         t.estatus,
         t.created_at,
         t.updated_at,
@@ -5493,7 +6282,7 @@ app.put("/trabajadores/:trabajadorId", async (req, res) => {
       telefono,
       fecha_ingreso,
       estatus,
-      nss, tipo_sangre, fecha_nacimiento, curp, sexo,
+      sexo,
     } = req.body;
 
     if (!trabajadorId || isNaN(Number(trabajadorId))) {
@@ -5552,15 +6341,6 @@ app.put("/trabajadores/:trabajadorId", async (req, res) => {
     }
 
     const trabajador = trabajadorActual.rows[0];
-    const datosRH = {
-      nss: nss === undefined ? trabajador.nss : nss,
-      tipo_sangre: tipo_sangre === undefined ? trabajador.tipo_sangre : tipo_sangre,
-      fecha_nacimiento: fecha_nacimiento === undefined ? trabajador.fecha_nacimiento : fecha_nacimiento,
-      curp: curp === undefined ? trabajador.curp : curp,
-      sexo: sexo === undefined ? trabajador.sexo : sexo,
-    };
-    const errorDatos = validarDatosRH(datosRH);
-    if (errorDatos) return res.status(400).json({ success: false, error: errorDatos });
 
     // =================================================
     // VALIDAR ÁREA
@@ -5638,6 +6418,11 @@ app.put("/trabajadores/:trabajadorId", async (req, res) => {
       }
     }
 
+    const sexoNormalizado = normalizarSexoRH(sexo);
+    if (sexoNormalizado && !["masculino", "femenino", "otro", "no_especificado"].includes(sexoNormalizado)) {
+      return res.status(400).json({ success: false, error: "Sexo inválido." });
+    }
+
     // =================================================
     // ACTUALIZAR
     // =================================================
@@ -5653,13 +6438,9 @@ app.put("/trabajadores/:trabajadorId", async (req, res) => {
         telefono = $5,
         fecha_ingreso = $6,
         estatus = $7,
-        nss = $8,
-        tipo_sangre = $9,
-        fecha_nacimiento = $10,
-        curp = $11,
-        sexo = $12,
+        sexo = COALESCE($8, sexo),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $13
+      WHERE id = $9
       RETURNING *
       `,
       [
@@ -5670,11 +6451,7 @@ app.put("/trabajadores/:trabajadorId", async (req, res) => {
         String(telefono || "").trim() || null,
         fecha_ingreso || null,
         estatus,
-        normalizarNssRH(datosRH.nss),
-        normalizarSangreRH(datosRH.tipo_sangre),
-        datosRH.fecha_nacimiento || null,
-        normalizarCurpRH(datosRH.curp),
-        normalizarSexoRH(datosRH.sexo),
+        sexoNormalizado,
         trabajadorId,
       ],
     );
@@ -6501,7 +7278,7 @@ app.get(
   autenticarRH, autorizarTrabajadorRH,
   async (req, res) => {
     try {
-      if (!/^\d+$/.test(req.params.estudioId)) {
+      if (!/^\\d+$/.test(req.params.estudioId)) {
         return res.status(400).json({ success: false, error: "Estudio inválido." });
       }
       const resultado = await db.query(`
@@ -6524,6 +7301,31 @@ app.get(
     } catch (error) {
       console.error("ERROR ABRIENDO ESTUDIO:", error);
       return res.status(500).json({ success: false, error: "No fue posible abrir el PDF." });
+    }
+  }
+);
+
+app.delete(
+  "/trabajadores/:trabajadorId/estudios-medicos/:estudioId",
+  autenticarRH, autorizarTrabajadorRH,
+  async (req, res) => {
+    try {
+      if (!/^\d+$/.test(req.params.estudioId)) {
+        return res.status(400).json({ success: false, error: "Estudio inválido." });
+      }
+      const resultado = await db.query(`
+        DELETE FROM trabajadores_estudios_medicos
+        WHERE id = $1 AND trabajador_id = $2
+        RETURNING archivo
+      `, [req.params.estudioId, req.params.trabajadorId]);
+      if (!resultado.rows.length) {
+        return res.status(404).json({ success: false, error: "Estudio no encontrado." });
+      }
+      await limpiarPdfMedico(path.join(estudiosMedicosDir, path.basename(resultado.rows[0].archivo)));
+      return res.json({ success: true, message: "Estudio médico eliminado." });
+    } catch (error) {
+      console.error("ERROR ELIMINANDO ESTUDIO:", error);
+      return res.status(500).json({ success: false, error: "No fue posible eliminar el estudio." });
     }
   }
 );
