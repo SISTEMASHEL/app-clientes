@@ -3094,14 +3094,14 @@ async function empresaContratistaDelCliente(clienteId, empresaId) {
   );
   return r.rows[0] || null;
 }
-async function validarAreaPuestoContratista(clienteId, areaId, puestoId) {
-  if (areaId === null && puestoId === null) return true;
+async function validarAreaPuestoContratista(empresaId, areaId, puestoId) {
+  if (areaId === null && puestoId === null) return true; // Expedientes anteriores
   if (areaId === null || puestoId === null) return false;
   const r = await db.query(
-    `SELECT 1 FROM areas_trabajo a
-     JOIN puestos_trabajo p ON p.area_id = a.id
-     WHERE a.id = $1 AND p.id = $2 AND a.cliente_id = $3`,
-    [areaId, puestoId, clienteId],
+    `SELECT 1 FROM areas_contratistas a
+     JOIN puestos_contratistas p ON p.area_id=a.id
+     WHERE a.id=$1 AND p.id=$2 AND a.empresa_contratista_id=$3`,
+    [areaId, puestoId, empresaId]
   );
   return r.rowCount > 0;
 }
@@ -3429,13 +3429,13 @@ app.post(
             error: "Empresa no encontrada para este cliente",
           });
       if (
-        !(await validarAreaPuestoContratista(clienteId, d.areaId, d.puestoId))
+        !(await validarAreaPuestoContratista(empresaId, d.areaId, d.puestoId))
       )
         return res
           .status(400)
           .json({
             success: false,
-            error: "Área y puesto deben corresponder al cliente",
+            error: "Área y puesto deben pertenecer a la empresa contratista",
           });
       const r = await db.query(
         `INSERT INTO trabajadores_contratistas
@@ -3489,13 +3489,13 @@ app.put(
             error: "Empresa no encontrada para este cliente",
           });
       if (
-        !(await validarAreaPuestoContratista(clienteId, d.areaId, d.puestoId))
+        !(await validarAreaPuestoContratista(empresaId, d.areaId, d.puestoId))
       )
         return res
           .status(400)
           .json({
             success: false,
-            error: "Área y puesto deben corresponder al cliente",
+            error: "Área y puesto deben pertenecer a la empresa contratista",
           });
       const r = await db.query(
         `UPDATE trabajadores_contratistas SET nombre=$1,curp=$2,nss=$3,
@@ -3644,6 +3644,142 @@ function eliminarArchivoContratista(ruta) {
     });
   }
 }
+
+// =====================================================
+// AREAS Y PUESTOS EXCLUSIVOS DE EMPRESAS CONTRATISTAS
+// Las rutas se montan bajo /contratistas/empresas para no alterar
+// el middleware existente /clientes/:clienteId/contratistas.
+// =====================================================
+async function accesoCatalogoEmpresaContratista(req, res, next) {
+  try {
+    const empresaId = idContratistaValido(req.params.empresaId);
+    if (!empresaId) return res.status(400).json({success:false,error:"Empresa inválida"});
+    const r = await db.query("SELECT id,cliente_id FROM empresas_contratistas WHERE id=$1",[empresaId]);
+    if (!r.rowCount) return res.status(404).json({success:false,error:"Empresa no encontrada"});
+    const u=req.usuarioRoles;
+    if (Number(u.cliente_id)!==Number(r.rows[0].cliente_id) ||
+       !(u.rol==="rh" || (u.rol==="contratista" && Number(u.contratista_empresa_id)===empresaId)))
+      return res.status(403).json({success:false,error:"Empresa no autorizada"});
+    req.empresaCatalogoId=empresaId;
+    if (req.method!=="GET" && u.rol!=="contratista")
+      return res.status(403).json({success:false,error:"Solo el contratista puede modificar áreas, puestos y archivos"});
+    next();
+  } catch(e) { console.error("Acceso catálogo contratista:",e); res.status(500).json({success:false,error:"Error de autorización"}); }
+}
+app.use("/contratistas/empresas/:empresaId",sesionRoles,accesoCatalogoEmpresaContratista);
+
+const errorCatalogoContratista=(res,e)=>{
+  console.error("Catálogo contratista:",e);
+  return res.status(e.code==="23505"?409:500).json({success:false,error:e.code==="23505"?"Ya existe un registro con ese nombre":"Error procesando catálogo"});
+};
+const areaDeEmpresa=async(empresaId,areaId)=>{
+  const r=await db.query("SELECT id FROM areas_contratistas WHERE id=$1 AND empresa_contratista_id=$2",[areaId,empresaId]);
+  return !!r.rowCount;
+};
+const puestoDeEmpresa=async(empresaId,puestoId)=>{
+  const r=await db.query(`SELECT p.* FROM puestos_contratistas p JOIN areas_contratistas a ON a.id=p.area_id WHERE p.id=$1 AND a.empresa_contratista_id=$2`,[puestoId,empresaId]);
+  return r.rows[0]||null;
+};
+
+app.get("/contratistas/empresas/:empresaId/areas",async(req,res)=>{
+  try { const r=await db.query("SELECT * FROM areas_contratistas WHERE empresa_contratista_id=$1 ORDER BY nombre_area",[req.empresaCatalogoId]);res.json({success:true,areas:r.rows}); }
+  catch(e){errorCatalogoContratista(res,e)}
+});
+app.post("/contratistas/empresas/:empresaId/areas",async(req,res)=>{
+  const nombre=textoContratista(req.body?.nombre_area,200);
+  if(!nombre)return res.status(400).json({success:false,error:"Nombre de área requerido"});
+  try {const r=await db.query("INSERT INTO areas_contratistas(empresa_contratista_id,nombre_area,descripcion) VALUES($1,$2,$3) RETURNING *",[req.empresaCatalogoId,nombre,textoContratista(req.body?.descripcion,10000)]);res.status(201).json({success:true,area:r.rows[0]});}
+  catch(e){errorCatalogoContratista(res,e)}
+});
+app.put("/contratistas/empresas/:empresaId/areas/:areaId",async(req,res)=>{
+  const id=idContratistaValido(req.params.areaId),nombre=textoContratista(req.body?.nombre_area,200);
+  if(!id||!nombre)return res.status(400).json({success:false,error:"Área o nombre inválido"});
+  try {const r=await db.query("UPDATE areas_contratistas SET nombre_area=$1,descripcion=$2 WHERE id=$3 AND empresa_contratista_id=$4 RETURNING *",[nombre,textoContratista(req.body?.descripcion,10000),id,req.empresaCatalogoId]);if(!r.rowCount)return res.status(404).json({success:false,error:"Área no encontrada"});res.json({success:true,area:r.rows[0]});}
+  catch(e){errorCatalogoContratista(res,e)}
+});
+
+async function riesgosValidosContratista(riesgos) {
+  if(!Array.isArray(riesgos)||riesgos.length>200)return null;
+  const ids=riesgos.map(idContratistaValido);
+  if(ids.some(x=>!x)||new Set(ids).size!==ids.length)return null;
+  if(!ids.length)return ids;
+  const r=await db.query("SELECT id FROM riesgos_laborales WHERE id=ANY($1::int[])",[ids]);
+  return r.rowCount===ids.length?ids:null;
+}
+async function datosPuestoCatalogo(req,res){
+  const areaId=idContratistaValido(req.body?.area_id),nombre=textoContratista(req.body?.nombre_puesto,200);
+  if(!areaId||!nombre||!(await areaDeEmpresa(req.empresaCatalogoId,areaId)))return null;
+  const riesgos=await riesgosValidosContratista(req.body?.riesgos??[]);
+  if(!riesgos || typeof req.body?.requiere_dc3!=="boolean" || typeof req.body?.requiere_dc5!=="boolean")return null;
+  return [areaId,nombre,textoContratista(req.body?.descripcion,10000),JSON.stringify(riesgos),req.body.requiere_dc3,req.body.requiere_dc5];
+}
+app.get("/contratistas/empresas/:empresaId/puestos",async(req,res)=>{
+  try {const r=await db.query(`SELECT p.*,a.nombre_area FROM puestos_contratistas p JOIN areas_contratistas a ON a.id=p.area_id WHERE a.empresa_contratista_id=$1 ORDER BY a.nombre_area,p.nombre_puesto`,[req.empresaCatalogoId]);res.json({success:true,puestos:r.rows});}
+  catch(e){errorCatalogoContratista(res,e)}
+});
+app.post("/contratistas/empresas/:empresaId/puestos",async(req,res)=>{
+  try {const d=await datosPuestoCatalogo(req,res);if(!d)return res.status(400).json({success:false,error:"Área, puesto, riesgos o requisitos inválidos"});
+    const r=await db.query(`INSERT INTO puestos_contratistas(area_id,nombre_puesto,descripcion,riesgos,requiere_dc3,requiere_dc5) VALUES($1,$2,$3,$4::jsonb,$5,$6) RETURNING *`,d);res.status(201).json({success:true,puesto:r.rows[0]});}
+  catch(e){errorCatalogoContratista(res,e)}
+});
+app.put("/contratistas/empresas/:empresaId/puestos/:puestoId",async(req,res)=>{
+  try {const id=idContratistaValido(req.params.puestoId),anterior=id&&await puestoDeEmpresa(req.empresaCatalogoId,id);
+    if(!anterior)return res.status(404).json({success:false,error:"Puesto no encontrado"});
+    const d=await datosPuestoCatalogo(req,res);if(!d)return res.status(400).json({success:false,error:"Área, puesto, riesgos o requisitos inválidos"});
+    // Impedir trasladar un puesto a otra área cuando tenga trabajadores asignados.
+    if(Number(anterior.area_id)!==d[0]){const ocupados=await db.query("SELECT 1 FROM trabajadores_contratistas WHERE puesto_id=$1 LIMIT 1",[id]);if(ocupados.rowCount)return res.status(409).json({success:false,error:"No se puede cambiar el área de un puesto con trabajadores asignados"});}
+    const r=await db.query(`UPDATE puestos_contratistas SET area_id=$1,nombre_puesto=$2,descripcion=$3,riesgos=$4::jsonb,requiere_dc3=$5,requiere_dc5=$6 WHERE id=$7 RETURNING *`,[...d,id]);res.json({success:true,puesto:r.rows[0]});}
+  catch(e){errorCatalogoContratista(res,e)}
+});
+
+// PDF del puesto: se almacena en /uploads con prefijo privado contratista-.
+// No se permite publicar la ruta física; solo descarga autenticada.
+const TIPOS_PDF_PUESTO=["arp","dc3","dc5"];
+const tipoPdfPuesto=(tipo)=>TIPOS_PDF_PUESTO.includes(tipo)?tipo:null;
+const rutaPdfPuesto=(tipo)=>`${tipo}_ruta_archivo`;
+const camposPdfPuesto=(tipo)=>({nombre:`${tipo}_nombre_archivo`,ruta:`${tipo}_ruta_archivo`,fecha:`${tipo}_fecha_actualizacion`,validador:`${tipo}_validado_por_usuario_id`,validacion:`${tipo}_fecha_validacion`});
+app.get("/contratistas/empresas/:empresaId/puestos/:puestoId/documentos",async(req,res)=>{
+  try {const p=await puestoDeEmpresa(req.empresaCatalogoId,idContratistaValido(req.params.puestoId));if(!p)return res.status(404).json({success:false,error:"Puesto no encontrado"});
+    res.json({success:true,documentos:TIPOS_PDF_PUESTO.map(tipo=>{const c=camposPdfPuesto(tipo);return {tipo_documento:tipo,nombre_archivo:p[c.nombre],fecha_actualizacion:p[c.fecha],validado_por_usuario_id:p[c.validador],fecha_validacion:p[c.validacion],cargado:!!p[c.ruta],estado:!p[c.ruta]?"rojo":p[c.validacion]?"verde":"amarillo"};})});}
+  catch(e){errorCatalogoContratista(res,e)}
+});
+app.post("/contratistas/empresas/:empresaId/puestos/:puestoId/documentos/:tipo",(req,res,next)=>{
+  if(!tipoPdfPuesto(req.params.tipo))return res.status(400).json({success:false,error:"Tipo de PDF inválido"});
+  ejecutarSubidaDocumentoContratista(req,res,next);
+},async(req,res)=>{
+  const nuevo=req.file?.filename;
+  try {const id=idContratistaValido(req.params.puestoId),tipo=req.params.tipo,p=await puestoDeEmpresa(req.empresaCatalogoId,id);
+    if(!p){if(nuevo)eliminarArchivoContratista(nuevo);return res.status(404).json({success:false,error:"Puesto no encontrado"});}
+    if(!req.file)return res.status(400).json({success:false,error:"Adjunta el PDF en el campo archivo"});
+    const fd=fs.openSync(req.file.path,"r"),firma=Buffer.alloc(5);try{fs.readSync(fd,firma,0,5,0)}finally{fs.closeSync(fd)}
+    if(firma.toString("ascii")!=="%PDF-"){eliminarArchivoContratista(nuevo);return res.status(400).json({success:false,error:"Archivo PDF inválido"});}
+    const c=camposPdfPuesto(tipo),anterior=p[c.ruta];
+    const r=await db.query(`UPDATE puestos_contratistas SET ${c.nombre}=$1,${c.ruta}=$2,${c.fecha}=CURRENT_TIMESTAMP,${c.validador}=NULL,${c.validacion}=NULL WHERE id=$3 RETURNING id,${c.nombre},${c.fecha}`,[path.basename(req.file.originalname||"documento.pdf").slice(0,250),nuevo,id]);
+    if(anterior && anterior!==nuevo)eliminarArchivoContratista(anterior);
+    res.json({success:true,documento:{...r.rows[0],tipo_documento:tipo,estado:"amarillo"}});
+  }catch(e){if(nuevo)eliminarArchivoContratista(nuevo);errorCatalogoContratista(res,e)}
+});
+app.get("/contratistas/empresas/:empresaId/puestos/:puestoId/documentos/:tipo/archivo",async(req,res)=>{
+  try {const tipo=tipoPdfPuesto(req.params.tipo),p=await puestoDeEmpresa(req.empresaCatalogoId,idContratistaValido(req.params.puestoId));
+    if(!tipo||!p)return res.status(404).json({success:false,error:"Documento no encontrado"});
+    const nombre=p[rutaPdfPuesto(tipo)];
+    if(!nombre||!/^[a-zA-Z0-9-]+\.pdf$/.test(nombre))return res.status(404).json({success:false,error:"PDF no encontrado"});
+    const archivo=path.join(uploadsDir,nombre);if(!fs.existsSync(archivo))return res.status(404).json({success:false,error:"Archivo no disponible"});
+    res.setHeader("Content-Type","application/pdf");res.setHeader("Cache-Control","no-store");res.setHeader("Content-Disposition","inline");return res.sendFile(archivo);
+  }catch(e){errorCatalogoContratista(res,e)}
+});
+app.patch("/contratistas/empresas/:empresaId/puestos/:puestoId/documentos/:tipo/validar",async(req,res)=>{
+  if(req.usuarioRoles.rol!=="rh")return res.status(403).json({success:false,error:"Solo RH puede validar"});
+  try {const tipo=tipoPdfPuesto(req.params.tipo),id=idContratistaValido(req.params.puestoId);
+    if(!tipo||!id)return res.status(400).json({success:false,error:"Documento inválido"});
+    const p=await puestoDeEmpresa(req.empresaCatalogoId,id);if(!p)return res.status(404).json({success:false,error:"Puesto no encontrado"});
+    const c=camposPdfPuesto(tipo),version=req.body?.fecha_actualizacion;
+    if(typeof version!=="string"||!Number.isFinite(Date.parse(version)))return res.status(400).json({success:false,error:"Se requiere fecha_actualizacion vigente"});
+    const r=await db.query(`UPDATE puestos_contratistas SET ${c.validador}=$1,${c.validacion}=CURRENT_TIMESTAMP WHERE id=$2 AND ${c.ruta} IS NOT NULL AND date_trunc('milliseconds',${c.fecha})=date_trunc('milliseconds',$3::timestamptz) RETURNING id,${c.fecha},${c.validacion}`,[req.usuarioRoles.id,id,version]);
+    if(!r.rowCount)return res.status(409).json({success:false,error:"El PDF fue reemplazado; actualiza la lista antes de validar"});
+    res.json({success:true,documento:{...r.rows[0],tipo_documento:tipo,estado:"verde"}});
+  }catch(e){errorCatalogoContratista(res,e)}
+});
 
 // Lista los cinco tipos, incluidos los pendientes de carga.
 app.get("/contratistas/trabajadores/:id/documentos", async (req, res) => {
